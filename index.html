@@ -214,6 +214,33 @@
     .api-notice a { color: #58a6ff; }
 
     /* ── Footer ─────────────────────────────────────────────────── */
+    .cam-section {
+      margin: 4px 12px 8px;
+    }
+    .cam-label {
+      font-size: 10px;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 0.8px;
+      color: #8b949e;
+      margin-bottom: 6px;
+    }
+    .cam-wrap {
+      position: relative;
+      width: 100%;
+      padding-top: 56.25%; /* 16:9 */
+      background: #0d1117;
+      border-radius: 10px;
+      overflow: hidden;
+      border: 1px solid #21262d;
+    }
+    .cam-wrap iframe {
+      position: absolute;
+      top: 0; left: 0;
+      width: 100%; height: 100%;
+      border: none;
+    }
+
     footer {
       text-align: center;
       padding: 24px 16px 8px;
@@ -343,6 +370,18 @@
       Tide data needs a free NIWA API key.<br>
       <a href="https://developer.niwa.co.nz" target="_blank">Register at developer.niwa.co.nz</a>
       then set <code>NIWA_KEY</code> in the CONFIG block.
+    </div>
+  </div>
+
+  <div class="cam-section">
+    <div class="cam-label">📷 Live Camera</div>
+    <div class="cam-wrap">
+      <iframe
+        src="https://customer-i5pk1zypbotc8vgf.cloudflarestream.com/86a9a0d45a6635fdcc23aa9e3005c3dc/iframe?dvrEnabled=true"
+        allow="accelerometer; gyroscope; autoplay; encrypted-media; picture-in-picture"
+        allowfullscreen
+        style="border:none; width:100%; height:100%;"
+      ></iframe>
     </div>
   </div>
 
