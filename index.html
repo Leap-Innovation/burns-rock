@@ -569,15 +569,15 @@ function renderWindChart(data) {
   });
 
   // Speed axis scaling:
-  //   1h view  — tight auto-scale to the visible data (detail view, unchanged)
-  //   4/24/48h — fixed 0–30 kt so days are visually comparable at a glance;
+  //   1h & 4h  — tight auto-scale to the visible data (detail views)
+  //   24h/48h  — fixed 0–30 kt so days are visually comparable at a glance;
   //              the axis only stretches upward when data exceeds 30 kt.
   const visibleGust = gust.filter((_, i) => new Date(labels[i]).getTime() >= windowStart);
   const visibleMa   = ma.filter((_, i)   => new Date(labels[i]).getTime() >= windowStart);
   const visibleSpeeds = [...visibleGust, ...visibleMa].filter(v => v != null && isFinite(v));
   const CAP = parseFloat(toDisplaySpeed(30));   // 30 kt in the display unit
   let yMin, yMax;
-  if (windHours === 1) {
+  if (windHours <= 4) {
     yMin = visibleSpeeds.length ? Math.min(...visibleSpeeds) : 0;
     yMax = visibleSpeeds.length ? Math.max(...visibleSpeeds) : CAP;
   } else {
