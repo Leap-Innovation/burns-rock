@@ -826,7 +826,11 @@ async function fetchWind() {
   if (!r.ok) throw new Error(`GAS HTTP ${r.status}`);
   const j = await r.json();
   if (!j.ok) throw new Error(j.error || 'GAS error');
-  return j.data;
+  // Defensive: sort ascending by time so data[length-1] is ALWAYS the newest
+  // point, whatever order the server returns. (2026-07: a server-side
+  // reverse() had "latest" pointing at the oldest row — the battery badge
+  // and wind card were showing day-old values.)
+  return (j.data || []).sort((a, b) => new Date(a.t) - new Date(b.t));
 }
 
 /* ── Fetch swell from Open-Meteo Marine (free, no key) ────────── */
