@@ -47,6 +47,26 @@
       font-size: 12px;
       color: #8b949e;
     }
+    /* Battery badge — station health at a glance (colour follows VOLTAGE,
+       matching the firmware's survival thresholds, not the unreliable %) */
+    .batt-badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 4px;
+      font-size: 12px;
+      font-weight: 600;
+      color: #8b949e;
+      background: #161b22;
+      border: 1px solid #21262d;
+      border-radius: 10px;
+      padding: 3px 9px;
+      margin-right: 8px;
+      white-space: nowrap;
+    }
+    .batt-badge b { font-weight: 700; }
+    .batt-ok   b { color: #3fb950; }   /* ≥ 3.70 V — healthy */
+    .batt-low  b { color: #f0883e; }   /* 3.50–3.69 V — keep an eye on it */
+    .batt-crit b { color: #f85149; }   /* < 3.50 V — approaching survival cutoff */
     .refresh-btn {
       background: none;
       border: none;
@@ -259,7 +279,10 @@
       <div class="site-name">🌊 <span>Burns</span> Rock</div>
       <div class="updated" id="updated-time">Loading…</div>
     </div>
-    <button class="refresh-btn" id="refresh-btn" title="Refresh" onclick="loadAll()">↻</button>
+    <div style="display:flex; align-items:center;">
+      <div class="batt-badge" id="batt-badge" title="Station battery (latest report)">🔋 <b id="batt-volt">–</b>&nbsp;<span id="batt-pct"></span></div>
+      <button class="refresh-btn" id="refresh-btn" title="Refresh" onclick="loadAll()">↻</button>
+    </div>
   </header>
 
   <!-- Status bar -->
@@ -941,6 +964,30 @@ function updateWindCard(data) {
   // Show "FROM NNE" so the text stays unambiguous alongside the downwind arrow
   const fromLabel = latest.wdt || deg2dir(latest.wd);
   document.getElementById('wind-dir-text').textContent  = 'from ' + fromLabel;
+
+  updateBatteryBadge(latest);
+}
+
+// Header battery badge — voltage-coloured (the firmware makes its survival
+// decisions on voltage; the MAX17048 percent is indicative only).
+function updateBatteryBadge(latest) {
+  const badge = document.getElementById('batt-badge');
+  if (!badge) return;
+  const v   = parseFloat(latest.batt);
+  const pct = parseFloat(latest.pct);
+  if (!v || v <= 0) {                       // no gauge data in the latest point
+    document.getElementById('batt-volt').textContent = 'n/a';
+    document.getElementById('batt-pct').textContent  = '';
+    badge.className = 'batt-badge';
+    return;
+  }
+  document.getElementById('batt-volt').textContent = v.toFixed(2) + ' V';
+  document.getElementById('batt-pct').textContent  =
+    (pct && pct > 0) ? '· ' + Math.round(pct) + '%' : '';
+  badge.className = 'batt-badge ' +
+    (v >= 3.70 ? 'batt-ok' : v >= 3.50 ? 'batt-low' : 'batt-crit');
+  badge.title = 'Station battery (latest report)' +
+    (v < 3.50 ? ' — nearing survival cutoff (3.30 V)' : '');
 }
 
 function updateSwellCard(swell) {
