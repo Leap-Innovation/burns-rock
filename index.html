@@ -80,6 +80,14 @@
       margin-right: 0;
       display: flex;              /* fill the grid cell edge to edge */
       justify-content: center;    /* centre content within each badge */
+      min-width: 0;               /* let the grid cell shrink the badge...   */
+      overflow: hidden;           /* ...instead of overflowing its column
+                                     (iPhone: battery badge spilled left) */
+      padding: 3px 4px;
+    }
+    /* Narrow phones: shave the badge text so all three fit their columns */
+    @media (max-width: 430px) {
+      .batt-badge { font-size: 11px; letter-spacing: -0.2px; gap: 3px; }
     }
     .refresh-btn {
       background: none;
@@ -1120,9 +1128,9 @@ function updateBatteryBadge(latest) {
     badge.className = 'batt-badge';
     return;
   }
-  document.getElementById('batt-volt').textContent = v.toFixed(2) + ' V';
+  document.getElementById('batt-volt').textContent = v.toFixed(2) + 'V';
   document.getElementById('batt-pct').textContent  =
-    (pct && pct > 0) ? '· ' + Math.round(pct) + '%' : '';
+    (pct && pct > 0) ? '·' + Math.round(pct) + '%' : '';
   badge.className = 'batt-badge ' +
     (v >= 3.70 ? 'batt-ok' : v >= 3.50 ? 'batt-low' : 'batt-crit');
   badge.title = 'Station battery (latest report)' +
