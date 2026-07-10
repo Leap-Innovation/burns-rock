@@ -391,7 +391,7 @@
   <div class="section">
     <div class="section-header">
       <span class="section-title">Swell</span>
-      <span class="section-badge">48 h</span>
+      <span class="section-badge">Today</span>
     </div>
     <div class="chart-wrap" id="swell-wrap"><canvas id="chart-swell"></canvas></div>
     <div class="legend">
@@ -500,6 +500,47 @@ Chart.register({
     ctx.lineWidth = 2.5;
     ctx.stroke();
     ctx.restore();
+  }
+});
+
+/* ── Today's local-midnight-to-midnight bounds (swell + tide share these
+      so their time axes align exactly) ─────────────────────────── */
+function todayBounds() {
+  const day0 = DateTime.now().setZone(CONFIG.TIMEZONE).startOf('day');
+  return { min: day0.toMillis(), max: day0.plus({ days: 1 }).toMillis() };
+}
+
+/* ── Sunrise/sunset vertical lines ────────────────────────────────
+   Times computed by updateSunBadge() (same solar math as the station).
+   Drawn only on charts that opt in via options.showSunLines. */
+let _sunTimes = null;   // { riseMs, setMs } — set by updateSunBadge()
+
+Chart.register({
+  id: 'sunLines',
+  afterRender(chart) {
+    if (!chart.options.showSunLines || !_sunTimes) return;
+    const xScale = chart.scales.x;
+    if (!xScale || xScale.type !== 'time') return;
+    const { ctx, chartArea } = chart;
+    [[_sunTimes.riseMs, '☀'], [_sunTimes.setMs, '☾']].forEach(([ms, glyph]) => {
+      if (!ms) return;
+      const x = xScale.getPixelForValue(ms);
+      if (x < xScale.left || x > xScale.right) return;
+      ctx.save();
+      ctx.beginPath();
+      ctx.setLineDash([4, 4]);
+      ctx.moveTo(x, chartArea.top + 12);
+      ctx.lineTo(x, chartArea.bottom);
+      ctx.strokeStyle = 'rgba(210,168,60,0.45)';   // light, unobtrusive
+      ctx.lineWidth = 1;
+      ctx.stroke();
+      ctx.setLineDash([]);
+      ctx.font = '10px -apple-system, sans-serif';
+      ctx.fillStyle = 'rgba(210,168,60,0.9)';
+      ctx.textAlign = 'center';
+      ctx.fillText(glyph, x, chartArea.top + 9);
+      ctx.restore();
+    });
   }
 });
 
@@ -711,10 +752,9 @@ function renderSwellChart(times, heights, periods, directions) {
   destroyChart('swell');
   const ctx = document.getElementById('chart-swell').getContext('2d');
 
-  // Shared window with tide chart so NOW lines land at the same position
-  const winMin = Date.now() - 12 * 3600e3;
-  const winMax = Date.now() + 36 * 3600e3;
-  const xAxis  = Object.assign(timeScaleOpts('hour'), { min: winMin, max: winMax });
+  // Today, local midnight → midnight — identical to the tide chart so the
+  // two time axes line up exactly.
+  const xAxis = Object.assign(timeScaleOpts('hour'), todayBounds());
 
   charts.swell = new Chart(ctx, {
     type: 'line',
@@ -761,6 +801,7 @@ function renderSwellChart(times, heights, periods, directions) {
     options: {
       responsive: true,
       maintainAspectRatio: false,
+      showSunLines: true,
       plugins: {
           legend: { display: false }
         },
@@ -829,16 +870,14 @@ function renderTideChart(times, heights, nowIso) {
     options: {
       responsive: true,
       maintainAspectRatio: false,
+      showSunLines: true,
       interaction: { mode: 'index', intersect: false },
       plugins: {
         legend: { display: false },
         annotation: undefined, // no annotation plugin loaded; we draw manually
       },
       scales: {
-        x: Object.assign(timeScaleOpts('hour', 'ha'), {
-             min: Date.now() - 12 * 3600e3,
-             max: Date.now() + 36 * 3600e3
-           }),
+        x: Object.assign(timeScaleOpts('hour', 'ha'), todayBounds()),
         y: {
           grid: GRID,
           ticks: { maxTicksLimit: 4, callback: v => v.toFixed(1) + ' m' }
@@ -1048,6 +1087,8 @@ function updateSunBadge() {
   }
   document.getElementById('sun-rise').textContent = rise ? rise.toFormat('HH:mm') + '↑' : '–';
   document.getElementById('sun-set').textContent  = set  ? '· ' + set.toFormat('HH:mm') + '↓' : '';
+  _sunTimes = { riseMs: rise ? rise.toMillis() : null,
+                setMs:  set  ? set.toMillis()  : null };   // for chart sun lines
 }
 
 // Header battery badge — voltage-coloured (the firmware makes its survival
