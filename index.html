@@ -33,7 +33,7 @@
       display: flex;
       align-items: center;
       justify-content: space-between;
-      padding: 14px 16px 10px;
+      padding: 8px 12px 6px;   /* tightened; 12px sides align with cards/badges */
       border-bottom: 1px solid #21262d;
     }
     .site-name {
@@ -289,11 +289,11 @@
 
   <!-- Header -->
   <header>
-    <div>
-      <div class="site-name">🌊 <span>Burns</span> Rock</div>
+    <div class="site-name">🌊 <span>Burns</span> Rock</div>
+    <div style="display:flex; align-items:center; gap:8px;">
       <div class="updated" id="updated-time">Loading…</div>
+      <button class="refresh-btn" id="refresh-btn" title="Refresh" onclick="loadAll()">↻</button>
     </div>
-    <button class="refresh-btn" id="refresh-btn" title="Refresh" onclick="loadAll()">↻</button>
   </header>
 
   <!-- Badge strip: sun times · temperatures · station battery -->
