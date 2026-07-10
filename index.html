@@ -481,6 +481,11 @@ Chart.defaults.plugins.tooltip.enabled = false;
 const GRID = { color: '#21262d', tickColor: 'transparent' };
 const ADAPTOPTS = { locale: 'en-NZ' };
 
+// Pinned axis widths so the swell and tide plot areas match exactly
+// (swell has two right-hand axes; tide pads its right edge to compensate).
+const LEFT_AXIS_W  = 56;   // left "x.x m" axis, both charts
+const RIGHT_AXES_W = 62;   // swell: seconds axis (34) + compass axis (28)
+
 /* ── "Now" vertical line — drawn on every time-axis chart ─────── */
 Chart.register({
   id: 'nowLine',
@@ -807,16 +812,22 @@ function renderSwellChart(times, heights, periods, directions) {
         },
       scales: {
         x: xAxis,
+        // Axis widths are PINNED (afterFit) so the plot area — and therefore
+        // the time axis — lines up pixel-for-pixel with the tide chart below.
+        // Tide compensates for the two right axes with layout padding.
+        // Shared constants: LEFT_AXIS_W / RIGHT_AXES_W.
         yH: {
           grid: GRID,
           beginAtZero: true,
           position: 'left',
+          afterFit: a => { a.width = LEFT_AXIS_W; },
           ticks: { maxTicksLimit: 4, callback: v => v.toFixed(1) + ' m' }
         },
         yP: {
           grid: { display: false },
           beginAtZero: true,
           position: 'right',
+          afterFit: a => { a.width = 34; },
           ticks: { maxTicksLimit: 4, callback: v => v + ' s' }
         },
         yD: {
@@ -824,6 +835,7 @@ function renderSwellChart(times, heights, periods, directions) {
           min: 0,
           max: 360,
           position: 'right',
+          afterFit: a => { a.width = RIGHT_AXES_W - 34; },
           // Force exactly the 8 compass-point ticks so S, E & W always appear
           afterBuildTicks: axis => {
             axis.ticks = [0, 45, 90, 135, 180, 225, 270, 315, 360].map(v => ({ value: v }));
@@ -872,6 +884,9 @@ function renderTideChart(times, heights, nowIso) {
       maintainAspectRatio: false,
       showSunLines: true,
       interaction: { mode: 'index', intersect: false },
+      // Right padding mirrors the swell chart's two right-hand axes so both
+      // plot areas are identical and the time axes align vertically.
+      layout: { padding: { right: RIGHT_AXES_W } },
       plugins: {
         legend: { display: false },
         annotation: undefined, // no annotation plugin loaded; we draw manually
@@ -880,6 +895,7 @@ function renderTideChart(times, heights, nowIso) {
         x: Object.assign(timeScaleOpts('hour', 'ha'), todayBounds()),
         y: {
           grid: GRID,
+          afterFit: a => { a.width = LEFT_AXIS_W; },
           ticks: { maxTicksLimit: 4, callback: v => v.toFixed(1) + ' m' }
         }
       }
