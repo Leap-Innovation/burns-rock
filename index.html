@@ -330,6 +330,7 @@
       </svg>
       <div class="card-sub">G <b id="wind-gust">–</b></div>
       <div class="card-sub" id="wind-dir-text">–</div>
+      <div class="card-sub" id="air-temp" title="Air temperature (Open-Meteo model)">🌡 –</div>
     </div>
     <!-- Swell -->
     <div class="card swell-card">
@@ -339,6 +340,7 @@
       <div class="card-unit">m</div>
       <div class="card-sub">T <b id="swell-period">–</b> s</div>
       <div class="card-sub" id="swell-dir">–</div>
+      <div class="card-sub" id="sea-temp" title="Sea surface temperature (Open-Meteo model)">🌡 –</div>
     </div>
     <!-- Tide -->
     <div class="card tide-card">
@@ -850,13 +852,23 @@ async function fetchSwell() {
   const url = [
     'https://marine-api.open-meteo.com/v1/marine',
     `?latitude=${CONFIG.LAT}&longitude=${CONFIG.LNG}`,
-    '&hourly=wave_height,wave_period,wave_direction',
+    '&hourly=wave_height,wave_period,wave_direction,sea_surface_temperature',
     `&timezone=${encodeURIComponent(CONFIG.TIMEZONE)}`,
     '&past_days=1&forecast_days=2',
   ].join('');
   const r = await fetch(url);
   if (!r.ok) throw new Error(`Open-Meteo HTTP ${r.status}`);
   return r.json();
+}
+
+/* ── Fetch current air temperature (Open-Meteo, free, no key) ─── */
+async function fetchAirTemp() {
+  const url = `https://api.open-meteo.com/v1/forecast?latitude=${CONFIG.LAT}&longitude=${CONFIG.LNG}` +
+              `&current=temperature_2m&timezone=${encodeURIComponent(CONFIG.TIMEZONE)}`;
+  const r = await fetch(url);
+  if (!r.ok) throw new Error(`Open-Meteo HTTP ${r.status}`);
+  const j = await r.json();
+  return (j.current && isFinite(j.current.temperature_2m)) ? j.current.temperature_2m : null;
 }
 
 /* ── Fetch tides from NIWA ────────────────────────────────────── */
@@ -1057,6 +1069,13 @@ function updateSwellCard(swell) {
   document.getElementById('swell-period').textContent = swell.hourly.wave_period[best].toFixed(0);
   const d = swell.hourly.wave_direction[best];
   document.getElementById('swell-dir').textContent    = deg2dir(d) + ' ' + Math.round(d) + '°';
+
+  // Sea surface temperature — same Open-Meteo marine call, nearest hour.
+  // Model data (not a buoy), so treat as indicative ±0.5–1 °C.
+  const sstArr = swell.hourly.sea_surface_temperature;
+  const sst = sstArr ? sstArr[best] : null;
+  document.getElementById('sea-temp').textContent =
+    (sst !== null && sst !== undefined && isFinite(sst)) ? `🌡 ${sst.toFixed(1)}°C` : '🌡 –';
 }
 
 function updateTideCard(times, heights) {
@@ -1096,11 +1115,19 @@ async function loadAll() {
     `${Math.abs(CONFIG.LAT).toFixed(4)}°S ${CONFIG.LNG.toFixed(4)}°E`;
 
   // Fetch all sources in parallel; handle each independently
-  const [windResult, swellResult, tideResult] = await Promise.allSettled([
+  const [windResult, swellResult, tideResult, airResult] = await Promise.allSettled([
     fetchWind(),
     fetchSwell(),
     fetchTides(),
+    fetchAirTemp(),
   ]);
+
+  /* Air temperature (Wind card) — model value, indicative */
+  if (airResult.status === 'fulfilled' && airResult.value != null) {
+    document.getElementById('air-temp').textContent = `🌡 ${airResult.value.toFixed(1)}°C`;
+  } else {
+    document.getElementById('air-temp').textContent = '🌡 –';
+  }
 
   const errors = [];
 
