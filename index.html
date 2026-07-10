@@ -67,14 +67,20 @@
     .batt-ok   b { color: #3fb950; }   /* ≥ 3.70 V — healthy */
     .batt-low  b { color: #f0883e; }   /* 3.50–3.69 V — keep an eye on it */
     .batt-crit b { color: #f85149; }   /* < 3.50 V — approaching survival cutoff */
-    /* Badge strip below the header — sun, temps, battery in one tidy row */
+    /* Badge strip below the header — sun, temps, battery. Mirrors the .cards
+       grid (3 equal columns, same gap/padding) so the badges line up exactly
+       with the condition cards below them. */
     .badge-strip {
-      display: flex;
-      flex-wrap: wrap;
-      gap: 6px;
-      padding: 8px 16px 0;
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 8px;
+      padding: 12px 12px 0;
     }
-    .badge-strip .batt-badge { margin-right: 0; }
+    .badge-strip .batt-badge {
+      margin-right: 0;
+      display: flex;              /* fill the grid cell edge to edge */
+      justify-content: center;    /* centre content within each badge */
+    }
     .refresh-btn {
       background: none;
       border: none;
