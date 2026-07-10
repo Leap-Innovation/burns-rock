@@ -382,7 +382,7 @@
       <span class="section-title">Wind</span>
       <div class="range-btns" id="wind-range-btns">
         <button class="range-btn" data-h="1"  onclick="setWindRange(1)">1h</button>
-        <button class="range-btn active" data-h="4"  onclick="setWindRange(4)">4h</button>
+        <button class="range-btn active" data-h="6"  onclick="setWindRange(6)">6h</button>
         <button class="range-btn" data-h="24" onclick="setWindRange(24)">24h</button>
         <button class="range-btn" data-h="48" onclick="setWindRange(48)">48h</button>
       </div>
@@ -579,7 +579,8 @@ function destroyChart(id) { if (charts[id]) { charts[id].destroy(); delete chart
 let _lastWindData = null;
 
 // Restore persisted range preference, default to full CONFIG window
-let windHours = parseInt(localStorage.getItem('windHours') || 4, 10);
+let windHours = parseInt(localStorage.getItem('windHours') || 6, 10);
+if (![1, 6, 24, 48].includes(windHours)) windHours = 6;   // migrate old stored values (e.g. 4)
 
 function setWindRange(h) {
   windHours = h;
@@ -588,8 +589,15 @@ function setWindRange(h) {
   document.querySelectorAll('#wind-range-btns .range-btn').forEach(btn => {
     btn.classList.toggle('active', parseInt(btn.dataset.h) === h);
   });
-  // Re-render combined chart from cached data (no network request needed)
+  // Render immediately from whatever's cached...
   if (_lastWindData) renderWindChart(_lastWindData);
+  // ...and if a long view needs history we don't have fresh, fetch the
+  // decimated coarse layer in the background and re-render when it lands.
+  if (h > DETAIL_HOURS && Date.now() - _coarseAt > COARSE_TTL_MS) {
+    fetchWindRange(CONFIG.WIND_HOURS, COARSE_STEP_S)
+      .then(pts => { mergeWind(pts); _coarseAt = Date.now(); renderWindChart(_windCache); })
+      .catch(err => console.error('Coarse wind fetch failed:', err));
+  }
 }
 
 // Apply persisted range on load (runs after DOM ready via init)
@@ -649,7 +657,7 @@ function renderWindChart(data) {
   const visibleSpeeds = [...visibleGust, ...visibleMa].filter(v => v != null && isFinite(v));
   const CAP = parseFloat(toDisplaySpeed(30));   // 30 kt in the display unit
   let yMin, yMax;
-  if (windHours <= 4) {
+  if (windHours <= 6) {   // 1h & 6h: tight auto-scale; 24/48h: fixed 0–30 kt
     yMin = visibleSpeeds.length ? Math.min(...visibleSpeeds) : 0;
     yMax = visibleSpeeds.length ? Math.max(...visibleSpeeds) : CAP;
   } else {
@@ -911,18 +919,48 @@ function renderTideChart(times, heights, nowIso) {
   });
 }
 
-/* ── Fetch wind data from Apps Script ─────────────────────────── */
-async function fetchWind() {
-  const url = `${CONFIG.GAS_URL}?cmd=get_data&hours=${CONFIG.WIND_HOURS}`;
+/* ── Wind data: layered fetch strategy ────────────────────────────
+   The 1-minute auto-refresh only ever fetches DETAIL_HOURS of full-res
+   data (fast — keeps the latest card/badges live). The long 24h/48h
+   history is fetched ON DEMAND, server-decimated to COARSE_STEP_S
+   buckets (night rows are sparser than the bucket, so they all survive),
+   cached and merged underneath. Full-res detail always wins on overlap. */
+const DETAIL_HOURS   = 6;        // full-resolution window, every refresh
+const COARSE_STEP_S  = 300;      // 5-min buckets for the long views
+const COARSE_TTL_MS  = 10 * 60e3; // re-fetch coarse layer after this
+
+let _windCache = [];             // merged points, ascending by time
+let _coarseAt  = 0;              // when the coarse layer was last fetched
+
+async function fetchWindRange(hours, stepS) {
+  const url = `${CONFIG.GAS_URL}?cmd=get_data&hours=${hours}` +
+              (stepS ? `&step=${stepS}` : '');
   const r = await fetch(url);
   if (!r.ok) throw new Error(`GAS HTTP ${r.status}`);
   const j = await r.json();
   if (!j.ok) throw new Error(j.error || 'GAS error');
-  // Defensive: sort ascending by time so data[length-1] is ALWAYS the newest
-  // point, whatever order the server returns. (2026-07: a server-side
-  // reverse() had "latest" pointing at the oldest row — the battery badge
-  // and wind card were showing day-old values.)
+  // Sort ascending so [length-1] is ALWAYS the newest (2026-07 lesson).
   return (j.data || []).sort((a, b) => new Date(a.t) - new Date(b.t));
+}
+
+function mergeWind(points) {
+  const byT = new Map(_windCache.map(p => [p.t, p]));
+  points.forEach(p => byT.set(p.t, p));
+  const floor = Date.now() - (CONFIG.WIND_HOURS + 1) * 3600e3;   // trim old
+  _windCache = [...byT.values()]
+    .filter(p => new Date(p.t).getTime() >= floor)
+    .sort((a, b) => new Date(a.t) - new Date(b.t));
+}
+
+async function loadWind() {
+  const wantCoarse = windHours > DETAIL_HOURS &&
+                     (Date.now() - _coarseAt > COARSE_TTL_MS);
+  const jobs = [fetchWindRange(DETAIL_HOURS, 0)];
+  if (wantCoarse) jobs.push(fetchWindRange(CONFIG.WIND_HOURS, COARSE_STEP_S));
+  const res = await Promise.all(jobs);
+  if (res[1]) { mergeWind(res[1]); _coarseAt = Date.now(); }
+  mergeWind(res[0]);   // detail second: full-res wins on overlapping times
+  return _windCache;
 }
 
 /* ── Fetch swell from Open-Meteo Marine (free, no key) ────────── */
@@ -1196,7 +1234,7 @@ async function loadAll() {
 
   // Fetch all sources in parallel; handle each independently
   const [windResult, swellResult, tideResult, airResult] = await Promise.allSettled([
-    fetchWind(),
+    loadWind(),
     fetchSwell(),
     fetchTides(),
     fetchAirTemp(),
