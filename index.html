@@ -67,6 +67,14 @@
     .batt-ok   b { color: #3fb950; }   /* ≥ 3.70 V — healthy */
     .batt-low  b { color: #f0883e; }   /* 3.50–3.69 V — keep an eye on it */
     .batt-crit b { color: #f85149; }   /* < 3.50 V — approaching survival cutoff */
+    /* Badge strip below the header — sun, temps, battery in one tidy row */
+    .badge-strip {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 6px;
+      padding: 8px 16px 0;
+    }
+    .badge-strip .batt-badge { margin-right: 0; }
     .refresh-btn {
       background: none;
       border: none;
@@ -279,12 +287,15 @@
       <div class="site-name">🌊 <span>Burns</span> Rock</div>
       <div class="updated" id="updated-time">Loading…</div>
     </div>
-    <div style="display:flex; align-items:center;">
-      <div class="batt-badge" id="sun-badge" title="Today's sunrise / sunset at Burns Rock">☀️ <b id="sun-rise">–</b>&nbsp;<span id="sun-set">–</span></div>
-      <div class="batt-badge" id="batt-badge" title="Station battery (latest report)">🔋 <b id="batt-volt">–</b>&nbsp;<span id="batt-pct"></span></div>
-      <button class="refresh-btn" id="refresh-btn" title="Refresh" onclick="loadAll()">↻</button>
-    </div>
+    <button class="refresh-btn" id="refresh-btn" title="Refresh" onclick="loadAll()">↻</button>
   </header>
+
+  <!-- Badge strip: sun times · temperatures · station battery -->
+  <div class="badge-strip">
+    <div class="batt-badge" id="sun-badge" title="Today's sunrise / sunset at Burns Rock">☀️ <b id="sun-rise">–</b>&nbsp;<span id="sun-set">–</span></div>
+    <div class="batt-badge" id="temp-badge" title="Air · sea temperature (Open-Meteo model)">🌡 <b id="air-temp-v">–</b>&nbsp;· 🌊 <b id="sea-temp-v">–</b></div>
+    <div class="batt-badge" id="batt-badge" title="Station battery (latest report)">🔋 <b id="batt-volt">–</b>&nbsp;<span id="batt-pct"></span></div>
+  </div>
 
   <!-- Status bar -->
   <div class="status-bar" id="status-bar"></div>
@@ -330,7 +341,6 @@
       </svg>
       <div class="card-sub">G <b id="wind-gust">–</b></div>
       <div class="card-sub" id="wind-dir-text">–</div>
-      <div class="card-sub" id="air-temp" title="Air temperature (Open-Meteo model)">🌡 –</div>
     </div>
     <!-- Swell -->
     <div class="card swell-card">
@@ -340,7 +350,6 @@
       <div class="card-unit">m</div>
       <div class="card-sub">T <b id="swell-period">–</b> s</div>
       <div class="card-sub" id="swell-dir">–</div>
-      <div class="card-sub" id="sea-temp" title="Sea surface temperature (Open-Meteo model)">🌡 –</div>
     </div>
     <!-- Tide -->
     <div class="card tide-card">
@@ -1074,8 +1083,8 @@ function updateSwellCard(swell) {
   // Model data (not a buoy), so treat as indicative ±0.5–1 °C.
   const sstArr = swell.hourly.sea_surface_temperature;
   const sst = sstArr ? sstArr[best] : null;
-  document.getElementById('sea-temp').textContent =
-    (sst !== null && sst !== undefined && isFinite(sst)) ? `🌡 ${sst.toFixed(1)}°C` : '🌡 –';
+  document.getElementById('sea-temp-v').textContent =
+    (sst !== null && sst !== undefined && isFinite(sst)) ? `${sst.toFixed(1)}°` : '–';
 }
 
 function updateTideCard(times, heights) {
@@ -1122,12 +1131,10 @@ async function loadAll() {
     fetchAirTemp(),
   ]);
 
-  /* Air temperature (Wind card) — model value, indicative */
-  if (airResult.status === 'fulfilled' && airResult.value != null) {
-    document.getElementById('air-temp').textContent = `🌡 ${airResult.value.toFixed(1)}°C`;
-  } else {
-    document.getElementById('air-temp').textContent = '🌡 –';
-  }
+  /* Air temperature (header temp badge) — model value, indicative */
+  document.getElementById('air-temp-v').textContent =
+    (airResult.status === 'fulfilled' && airResult.value != null)
+      ? `${airResult.value.toFixed(1)}°` : '–';
 
   const errors = [];
 
