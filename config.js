@@ -10,6 +10,6 @@ const CONFIG = {
   SITE_NAME:   'Burns Rock',
   LAT:         -36.7732,
   LNG:         175.0274,
-  NIWA_KEY:    '',                 // optional — get free key at developer.niwa.co.nz
+  NIWA_KEY:    'vCGlyB8VgvPfxiWIyRPCXnQxuWEcielw',                 // optional — get free key at developer.niwa.co.nz
   REFRESH_MIN: 1,                  // auto-refresh interval in minutes
 };
