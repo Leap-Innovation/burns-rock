@@ -324,6 +324,10 @@
       <span class="updated" id="batt-page-note" style="margin-left:auto;">pinch / scroll to zoom · drag to pan</span>
       <button class="range-btn" onclick="resetBattZoom()">reset</button>
     </div>
+    <div class="updated" id="boot-info"
+         style="padding:6px 14px; border-bottom:1px solid #21262d; white-space:nowrap; overflow-x:auto;">
+      loading boot info…
+    </div>
     <div style="flex:1; min-height:0; padding:4px 10px 12px;">
       <canvas id="chart-batt"></canvas>
     </div>
@@ -1187,6 +1191,8 @@ async function openBatteryPage() {
     await screen.orientation.lock('landscape');
   } catch (_) { /* iOS / unsupported — rotate manually */ }
 
+  updateBootInfo();   // fetches in parallel with the battery data
+
   const note = document.getElementById('batt-page-note');
   if (!_battData || Date.now() - _battAt > 10 * 60e3) {
     note.textContent = 'loading 7 days…';
@@ -1210,6 +1216,25 @@ function closeBatteryPage() {
 }
 
 function resetBattZoom() { if (charts.batt) charts.batt.resetZoom(); }
+
+// Latest boot line for the health page. A recent unexpected boot is the #1
+// "something happened" signal, so it gets glanced at alongside the battery.
+async function updateBootInfo() {
+  const el = document.getElementById('boot-info');
+  try {
+    const r = await fetch(`${CONFIG.GAS_URL}?cmd=get_boot&limit=2`);
+    const j = await r.json();
+    if (!j.ok || !j.boots || !j.boots.length) { el.textContent = 'no boot events recorded'; return; }
+    const b = j.boots[0];
+    let line = `Last boot: ${b.t} · ${b.fw} · ${b.mode} · ${b.cpu} MHz · ` +
+               `LTE ${b.lte} · MQTT ${b.mqtt} · ${parseFloat(b.batt_v) ? parseFloat(b.batt_v).toFixed(2) + ' V · ' : ''}` +
+               `Reboot #${b.reboots}`;
+    if (j.boots[1]) line += `   (prev: ${j.boots[1].t})`;
+    el.textContent = line;
+  } catch (e) {
+    el.textContent = 'boot info unavailable';
+  }
+}
 
 function renderBattChart(data) {
   destroyChart('batt');
