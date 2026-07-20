@@ -313,7 +313,7 @@
     <div class="batt-badge" id="sun-badge" title="Today's sunrise / sunset at Burns Rock">☀️ <b id="sun-rise">–</b>&nbsp;<span id="sun-set">–</span></div>
     <div class="batt-badge" id="temp-badge" title="Air · sea temperature (Open-Meteo model)">🌡 <b id="air-temp-v">–</b>&nbsp;· 🌊 <b id="sea-temp-v">–</b></div>
     <div class="batt-badge" id="batt-badge" title="Station battery — tap for 7-day history"
-         style="cursor:pointer;" onclick="openBatteryPage()">🔋 <b id="batt-volt">–</b>&nbsp;<span id="batt-pct"></span></div>
+         style="cursor:pointer;">🔋 <b id="batt-volt">–</b>&nbsp;<span id="batt-pct"></span></div>
   </div>
 
   <!-- Battery history page — full-screen overlay, opened from the battery badge -->
@@ -1182,6 +1182,15 @@ function updateSunBadge() {
    landscape lock is attempted — Android honours it; iOS ignores the
    lock, so rotate the phone there. */
 let _battData = null, _battAt = 0;
+
+// Belt-and-braces: attach the handler in JS too (inline onclick is also set),
+// and make sure the zoom plugin is registered (its auto-registration varies
+// between builds; double-registering is harmless).
+window.addEventListener('DOMContentLoaded', () => {
+  const b = document.getElementById('batt-badge');
+  if (b) b.addEventListener('click', openBatteryPage);
+  try { if (window.ChartZoom) Chart.register(window.ChartZoom); } catch (_) {}
+});
 
 async function openBatteryPage() {
   const page = document.getElementById('batt-page');
