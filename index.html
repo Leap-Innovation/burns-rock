@@ -459,7 +459,7 @@
 
   <footer>
     Burns Rock Wind Station · <span id="footer-coords"></span> ·
-    <span title="Dashboard version — bumped on every edit">D3</span>
+    <span title="Dashboard version — bumped on every edit">D4</span>
   </footer>
 
 </div>
@@ -1195,11 +1195,7 @@ window.addEventListener('DOMContentLoaded', () => {
 
 async function openBatteryPage() {
   const page = document.getElementById('batt-page');
-  page.style.display = 'flex';
-  try {                                   // best-effort landscape fullscreen
-    await page.requestFullscreen();
-    await screen.orientation.lock('landscape');
-  } catch (_) { /* iOS / unsupported — rotate manually */ }
+  page.style.display = 'flex';   // overlay fills the tab — no fullscreen takeover
 
   updateBootInfo();   // fetches in parallel with the battery data
 
@@ -1221,8 +1217,6 @@ async function openBatteryPage() {
 function closeBatteryPage() {
   destroyChart('batt');
   document.getElementById('batt-page').style.display = 'none';
-  try { screen.orientation.unlock(); } catch (_) {}
-  if (document.fullscreenElement) document.exitFullscreen().catch(() => {});
 }
 
 function resetBattZoom() { if (charts.batt) charts.batt.resetZoom(); }
@@ -1252,9 +1246,15 @@ function renderBattChart(data) {
   const pts = data.filter(p => p.batt && p.batt > 0);
   // 2 h moving average (12 × 10-min buckets): the raw voltage carries ±40 mV
   // of modem-burst sag noise — the MA is the real state-of-charge trend.
+  // NOTE: not the wind chart's movingAvg() — that one rounds to 1 decimal
+  // (fine for knots, but it quantised volts into 0.1 V steps).
+  const maFull = (arr, w) => arr.map((_, i) => {
+    const s = arr.slice(Math.max(0, i - w + 1), i + 1);
+    return s.reduce((a, v) => a + v, 0) / s.length;
+  });
   const vRaw = pts.map(p => p.batt);
-  const vMA  = movingAvg(vRaw, 12);
-  const pMA  = movingAvg(pts.map(p => p.pct), 12);
+  const vMA  = maFull(vRaw, 12);
+  const pMA  = maFull(pts.map(p => p.pct), 12);
   charts.batt = new Chart(ctx, {
     type: 'line',
     data: {
