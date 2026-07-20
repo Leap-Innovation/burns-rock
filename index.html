@@ -1,1 +1,1462 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="theme-color" content="#0d1117">
+  <title>Burns Rock</title>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/luxon/3.4.4/luxon.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/chartjs-adapter-luxon@1.3.1/dist/chartjs-adapter-luxon.umd.min.js"></script>
+  <!-- Pinch/scroll zoom for the battery history page -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/hammer.js/2.0.8/hammer.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/chartjs-plugin-zoom/2.0.1/chartjs-plugin-zoom.min.js"></script>
+  <!-- Your personal config — edit config.js, never touch this file.
+       Bump ?v= when config.js changes so cached copies refresh. -->
+  <script src="config.js?v=2"></script>
+  <style>
+    /* ── Reset & base ───────────────────────────────────────────── */
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    html, body { height: 100%; }
+    body {
+      background: #0d1117;
+      color: #c9d1d9;
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
+      font-size: 15px;
+      line-height: 1.4;
+    }
+    a { color: #58a6ff; text-decoration: none; }
 
+    /* ── Layout ─────────────────────────────────────────────────── */
+    .page { max-width: 480px; margin: 0 auto; padding: 0 0 32px; }
+
+    /* ── Header ─────────────────────────────────────────────────── */
+    header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 8px 12px 6px;   /* tightened; 12px sides align with cards/badges */
+      border-bottom: 1px solid #21262d;
+    }
+    .site-name {
+      font-size: 18px;
+      font-weight: 700;
+      color: #f0f6fc;
+      letter-spacing: -0.3px;
+    }
+    .site-name span { color: #58a6ff; }
+    .updated {
+      font-size: 12px;
+      color: #8b949e;
+    }
+    /* Battery badge — station health at a glance (colour follows VOLTAGE,
+       matching the firmware's survival thresholds, not the unreliable %) */
+    .batt-badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 4px;
+      font-size: 12px;
+      font-weight: 600;
+      color: #8b949e;
+      background: #161b22;
+      border: 1px solid #21262d;
+      border-radius: 10px;
+      padding: 3px 9px;
+      margin-right: 8px;
+      white-space: nowrap;
+    }
+    .batt-badge b { font-weight: 700; }
+    .batt-ok   b { color: #3fb950; }   /* ≥ 3.70 V — healthy */
+    .batt-low  b { color: #f0883e; }   /* 3.50–3.69 V — keep an eye on it */
+    .batt-crit b { color: #f85149; }   /* < 3.50 V — approaching survival cutoff */
+    /* Badge strip below the header — sun, temps, battery. Mirrors the .cards
+       grid (3 equal columns, same gap/padding) so the badges line up exactly
+       with the condition cards below them. */
+    .badge-strip {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 8px;
+      padding: 12px 12px 0;
+    }
+    .badge-strip .batt-badge {
+      margin-right: 0;
+      display: flex;              /* fill the grid cell edge to edge */
+      justify-content: center;    /* centre content within each badge */
+      min-width: 0;               /* let the grid cell shrink the badge...   */
+      overflow: hidden;           /* ...instead of overflowing its column
+                                     (iPhone: battery badge spilled left) */
+      padding: 3px 4px;
+    }
+    /* Narrow phones: shave the badge text so all three fit their columns */
+    @media (max-width: 430px) {
+      .batt-badge { font-size: 11px; letter-spacing: -0.2px; gap: 3px; }
+    }
+    .refresh-btn {
+      background: none;
+      border: none;
+      cursor: pointer;
+      color: #8b949e;
+      font-size: 18px;
+      padding: 2px 4px;
+      transition: color 0.2s;
+    }
+    .refresh-btn:hover { color: #58a6ff; }
+    .refresh-btn.spinning { animation: spin 1s linear infinite; }
+    @keyframes spin { to { transform: rotate(360deg); } }
+
+    /* ── Condition cards ────────────────────────────────────────── */
+    .cards {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 8px;
+      padding: 12px 12px 4px;
+    }
+    .card {
+      background: #161b22;
+      border: 1px solid #21262d;
+      border-radius: 10px;
+      padding: 12px 10px 10px;
+      text-align: center;
+    }
+    .card-label {
+      font-size: 10px;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 0.8px;
+      color: #8b949e;
+      margin-bottom: 6px;
+    }
+    .card-value {
+      font-size: 28px;
+      font-weight: 700;
+      color: #f0f6fc;
+      line-height: 1;
+    }
+    .card-unit {
+      font-size: 12px;
+      color: #8b949e;
+      margin-top: 2px;
+    }
+    .card-sub {
+      font-size: 12px;
+      color: #8b949e;
+      margin-top: 4px;
+    }
+    .card-sub b { color: #c9d1d9; font-weight: 600; }
+    .compass-svg {
+      width: 100%;
+      height: auto;
+      display: block;
+      margin: 2px auto 2px;
+    }
+    .wind-card .card-value  { color: #58a6ff; }
+    .swell-card .card-value { color: #3fb950; }
+    .tide-card .card-value  { color: #f0883e; }
+
+    /* ── Status banner (errors / loading) ───────────────────────── */
+    .status-bar {
+      margin: 8px 12px 0;
+      padding: 8px 12px;
+      border-radius: 6px;
+      font-size: 12px;
+      display: none;
+    }
+    .status-bar.error   { background: #2d1416; border: 1px solid #6e2b2b; color: #f85149; display: block; }
+    .status-bar.warning { background: #1c1a10; border: 1px solid #5c4a10; color: #e3b341; display: block; }
+    .status-bar.info    { background: #0d2035; border: 1px solid #1a4060; color: #58a6ff; display: block; }
+
+    /* ── Chart sections ─────────────────────────────────────────── */
+    .section {
+      margin: 16px 12px 0;
+      background: #161b22;
+      border: 1px solid #21262d;
+      border-radius: 10px;
+      overflow: hidden;
+    }
+    .section-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 10px 14px 8px;
+      border-bottom: 1px solid #21262d;
+    }
+    .section-title {
+      font-size: 13px;
+      font-weight: 600;
+      color: #c9d1d9;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+    }
+    .section-badge {
+      font-size: 11px;
+      color: #8b949e;
+      background: #21262d;
+      padding: 2px 8px;
+      border-radius: 10px;
+    }
+
+    /* ── Range toggle buttons ───────────────────────────────────── */
+    .range-btns {
+      display: flex;
+      gap: 4px;
+    }
+    .range-btn {
+      background: #21262d;
+      border: 1px solid #30363d;
+      border-radius: 8px;
+      color: #8b949e;
+      font-size: 11px;
+      font-weight: 600;
+      padding: 2px 8px;
+      cursor: pointer;
+      transition: background 0.15s, color 0.15s, border-color 0.15s;
+      -webkit-tap-highlight-color: transparent;
+    }
+    .range-btn:hover { background: #30363d; color: #c9d1d9; }
+    .range-btn.active {
+      background: #1f6feb;
+      border-color: #388bfd;
+      color: #f0f6fc;
+    }
+    .chart-wrap {
+      padding: 12px 10px 8px;
+      position: relative;
+      height: 180px;
+    }
+    .chart-wrap canvas { display: block; }
+
+    /* ── Legend ─────────────────────────────────────────────────── */
+    .legend {
+      display: flex;
+      gap: 12px;
+      padding: 0 14px 10px;
+      flex-wrap: wrap;
+    }
+    .legend-item {
+      display: flex;
+      align-items: center;
+      gap: 5px;
+      font-size: 11px;
+      color: #8b949e;
+    }
+    .legend-dot {
+      width: 8px; height: 8px; border-radius: 50%;
+      flex-shrink: 0;
+    }
+    .legend-dash {
+      width: 16px; height: 2px;
+      flex-shrink: 0;
+    }
+
+    /* ── API key notice ─────────────────────────────────────────── */
+    .api-notice {
+      padding: 20px 16px;
+      text-align: center;
+      color: #8b949e;
+      font-size: 13px;
+    }
+    .api-notice a { color: #58a6ff; }
+
+    /* ── Footer ─────────────────────────────────────────────────── */
+    .cam-section {
+      margin: 4px 12px 8px;
+    }
+    .cam-label {
+      font-size: 10px;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 0.8px;
+      color: #8b949e;
+      margin-bottom: 6px;
+    }
+    .cam-wrap {
+      position: relative;
+      width: 100%;
+      padding-top: 56.25%; /* 16:9 */
+      background: #0d1117;
+      border-radius: 10px;
+      overflow: hidden;
+      border: 1px solid #21262d;
+    }
+    .cam-wrap iframe,
+    .cam-wrap video {
+      position: absolute;
+      top: 0; left: 0;
+      width: 100%; height: 100%;
+      border: none;
+    }
+
+    footer {
+      text-align: center;
+      padding: 24px 16px 8px;
+      font-size: 11px;
+      color: #484f58;
+    }
+  </style>
+</head>
+<body>
+<div class="page">
+
+  <!-- Header -->
+  <header>
+    <div class="site-name">🌊 <span>Burns</span> Rock</div>
+    <div style="display:flex; align-items:center; gap:8px;">
+      <div class="updated" id="updated-time">Loading…</div>
+      <button class="refresh-btn" id="refresh-btn" title="Refresh" onclick="loadAll()">↻</button>
+    </div>
+  </header>
+
+  <!-- Badge strip: sun times · temperatures · station battery -->
+  <div class="badge-strip">
+    <div class="batt-badge" id="sun-badge" title="Today's sunrise / sunset at Burns Rock">☀️ <b id="sun-rise">–</b>&nbsp;<span id="sun-set">–</span></div>
+    <div class="batt-badge" id="temp-badge" title="Air · sea temperature (Open-Meteo model)">🌡 <b id="air-temp-v">–</b>&nbsp;· 🌊 <b id="sea-temp-v">–</b></div>
+    <div class="batt-badge" id="batt-badge" title="Station battery — tap for 7-day history"
+         style="cursor:pointer;">🔋 <b id="batt-volt">–</b>&nbsp;<span id="batt-pct"></span></div>
+  </div>
+
+  <!-- Battery history page — full-screen overlay, opened from the battery badge -->
+  <div id="batt-page" style="display:none; position:fixed; inset:0; z-index:50; background:#0d1117; flex-direction:column;">
+    <div style="display:flex; align-items:center; gap:10px; padding:10px 14px; border-bottom:1px solid #21262d;">
+      <button class="refresh-btn" onclick="closeBatteryPage()" title="Back" style="font-size:20px;">←</button>
+      <span style="font-weight:700; color:#f0f6fc;">🔋 Battery — last 7 days</span>
+      <span class="updated" id="batt-page-note" style="margin-left:auto;">pinch / scroll to zoom · drag to pan</span>
+      <button class="range-btn" onclick="resetBattZoom()">reset</button>
+    </div>
+    <div class="updated" id="boot-info"
+         style="padding:6px 14px; border-bottom:1px solid #21262d; white-space:nowrap; overflow-x:auto;">
+      loading boot info…
+    </div>
+    <div style="flex:1; min-height:0; padding:4px 10px 12px;">
+      <canvas id="chart-batt"></canvas>
+    </div>
+  </div>
+
+  <!-- Status bar -->
+  <div class="status-bar" id="status-bar"></div>
+
+  <!-- Current conditions cards -->
+  <div class="cards">
+    <!-- Wind -->
+    <div class="card wind-card">
+      <div class="card-label">Wind</div>
+      <!-- Compass dial: needle rotates to wind-from bearing; speed in centre -->
+      <svg class="compass-svg" viewBox="-48 -48 96 96">
+        <!-- Ring -->
+        <circle r="43" fill="#0d1117"/>
+        <circle r="43" fill="none" stroke="#21262d" stroke-width="1.5"/>
+        <!-- 8-point ticks -->
+        <line x1="0"    y1="-43" x2="0"    y2="-36" stroke="#8b949e" stroke-width="1.5"/>
+        <line x1="30.4" y1="-30.4" x2="25.5" y2="-25.5" stroke="#21262d" stroke-width="1"/>
+        <line x1="43"   y1="0"   x2="36"   y2="0"   stroke="#21262d" stroke-width="1"/>
+        <line x1="30.4" y1="30.4" x2="25.5" y2="25.5" stroke="#21262d" stroke-width="1"/>
+        <line x1="0"    y1="43"  x2="0"    y2="36"  stroke="#21262d" stroke-width="1"/>
+        <line x1="-30.4" y1="30.4" x2="-25.5" y2="25.5" stroke="#21262d" stroke-width="1"/>
+        <line x1="-43"  y1="0"  x2="-36"  y2="0"   stroke="#21262d" stroke-width="1"/>
+        <line x1="-30.4" y1="-30.4" x2="-25.5" y2="-25.5" stroke="#21262d" stroke-width="1"/>
+        <!-- Cardinal labels -->
+        <text x="0"   y="-27" text-anchor="middle" font-size="9" font-weight="700" fill="#c9d1d9" font-family="-apple-system,sans-serif">N</text>
+        <text x="31"  y="4"   text-anchor="middle" font-size="7" fill="#8b949e" font-family="-apple-system,sans-serif">E</text>
+        <text x="0"   y="38"  text-anchor="middle" font-size="7" fill="#8b949e" font-family="-apple-system,sans-serif">S</text>
+        <text x="-31" y="4"   text-anchor="middle" font-size="7" fill="#8b949e" font-family="-apple-system,sans-serif">W</text>
+        <!-- Rotating needle -->
+        <g id="wind-needle" transform="rotate(0)">
+          <polygon points="0,-35 4.5,-14 0,-20 -4.5,-14" fill="#58a6ff"/>
+          <polygon points="0,22 3.5,12 -3.5,12"           fill="#30363d"/>
+        </g>
+        <!-- Centre disc so needle doesn't obscure speed -->
+        <circle r="18" fill="rgba(13,17,23,0.88)"/>
+        <!-- Speed & unit in centre -->
+        <text id="wind-speed" x="0" y="4" text-anchor="middle" dominant-baseline="middle"
+              font-size="17" font-weight="700" fill="#f0f6fc"
+              font-family="-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif">–</text>
+        <text id="wind-unit" x="0" y="15" text-anchor="middle"
+              font-size="6" fill="#8b949e"
+              font-family="-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif">–</text>
+      </svg>
+      <div class="card-sub">G <b id="wind-gust">–</b></div>
+      <div class="card-sub" id="wind-dir-text">–</div>
+    </div>
+    <!-- Swell -->
+    <div class="card swell-card">
+      <div class="card-label">Swell</div>
+      <div style="font-size:22px; margin-bottom:4px;">🌊</div>
+      <div class="card-value" id="swell-height">–</div>
+      <div class="card-unit">m</div>
+      <div class="card-sub">T <b id="swell-period">–</b> s</div>
+      <div class="card-sub" id="swell-dir">–</div>
+    </div>
+    <!-- Tide -->
+    <div class="card tide-card">
+      <div class="card-label">Tide</div>
+      <div style="font-size:22px; margin-bottom:4px;" id="tide-arrow-icon">🌊</div>
+      <div class="card-value" id="tide-height">–</div>
+      <div class="card-unit">m</div>
+      <div class="card-sub" id="tide-trend">–</div>
+      <div class="card-sub" id="tide-next">–</div>
+    </div>
+  </div>
+
+  <!-- Wind Chart (speed + direction combined) -->
+  <div class="section">
+    <div class="section-header">
+      <span class="section-title">Wind</span>
+      <div class="range-btns" id="wind-range-btns">
+        <button class="range-btn" data-h="1"  onclick="setWindRange(1)">1h</button>
+        <button class="range-btn active" data-h="6"  onclick="setWindRange(6)">6h</button>
+        <button class="range-btn" data-h="24" onclick="setWindRange(24)">24h</button>
+        <button class="range-btn" data-h="48" onclick="setWindRange(48)">48h</button>
+      </div>
+    </div>
+    <div class="chart-wrap"><canvas id="chart-wind"></canvas></div>
+    <div class="legend">
+      <div class="legend-item"><div class="legend-dot" style="background:#a371f7"></div> Direction</div>
+      <div class="legend-item"><div class="legend-dot" style="background:#58a6ff"></div> 10m MA</div>
+      <div class="legend-item"><div class="legend-dash" style="background:#f0883e"></div> Gust</div>
+    </div>
+  </div>
+
+  <!-- Swell Chart -->
+  <div class="section">
+    <div class="section-header">
+      <span class="section-title">Swell</span>
+      <span class="section-badge">Today</span>
+    </div>
+    <div class="chart-wrap" id="swell-wrap"><canvas id="chart-swell"></canvas></div>
+    <div class="legend">
+      <div class="legend-item"><div class="legend-dot" style="background:#3fb950"></div> Height (m)</div>
+      <div class="legend-item"><div class="legend-dot" style="background:#58a6ff"></div> Period (s)</div>
+      <div class="legend-item"><div class="legend-dot" style="background:rgba(210,153,255,0.85)"></div> Direction</div>
+    </div>
+  </div>
+
+  <!-- Tide Chart -->
+  <div class="section">
+    <div class="section-header">
+      <span class="section-title">Tide</span>
+      <span class="section-badge">Today</span>
+    </div>
+    <div class="chart-wrap" id="tide-wrap"><canvas id="chart-tide"></canvas></div>
+    <div id="tide-notice" class="api-notice" style="display:none">
+      Tide data needs a free NIWA API key.<br>
+      <a href="https://developer.niwa.co.nz" target="_blank">Register at developer.niwa.co.nz</a>
+      then set <code>NIWA_KEY</code> in the CONFIG block.
+    </div>
+  </div>
+
+  <div class="cam-section">
+    <div class="cam-label">📷 Live Camera</div>
+    <div class="cam-wrap">
+      <iframe
+        src="https://customer-i5pk1zypbotc8vgf.cloudflarestream.com/86a9a0d45a6635fdcc23aa9e3005c3dc/iframe?dvrEnabled=true"
+        allow="accelerometer; gyroscope; autoplay; encrypted-media; picture-in-picture"
+        allowfullscreen
+        style="border:none; width:100%; height:100%;"
+      ></iframe>
+    </div>
+  </div>
+
+  <footer>
+    Burns Rock Wind Station · <span id="footer-coords"></span> ·
+    <span title="Dashboard version — bumped on every edit">D1</span>
+  </footer>
+
+</div>
+
+<script>
+// CONFIG is loaded from config.js (see <head>) — edit that file, not this one.
+
+const { DateTime } = luxon;
+
+/* ── Unit helpers ─────────────────────────────────────────────── */
+// Raw data is already in the unit specified by WIND_UNIT — no conversion needed.
+// If you ever switch to a station that outputs m/s and want to display in kts,
+// change WIND_UNIT to 'ms' and add a * 1.94384 multiplier here.
+function toDisplaySpeed(v) {
+  return Number(v).toFixed(1);
+}
+function unitLabel() {
+  if (CONFIG.WIND_UNIT === 'kmh') return 'km/h';
+  if (CONFIG.WIND_UNIT === 'kts') return 'kts';
+  return 'm/s';
+}
+/* Compass bearing → arrow emoji */
+function bearingArrow(deg) {
+  const arrows = ['↑','↗','→','↘','↓','↙','←','↖'];
+  return arrows[Math.round(deg / 45) % 8];
+}
+/* Degrees → compass text */
+function deg2dir(deg) {
+  const dirs = ['N','NNE','NE','ENE','E','ESE','SE','SSE',
+                'S','SSW','SW','WSW','W','WNW','NW','NNW'];
+  return dirs[Math.round(deg / 22.5) % 16];
+}
+
+/* ── Status bar ───────────────────────────────────────────────── */
+function setStatus(msg, type) {
+  const el = document.getElementById('status-bar');
+  el.className = 'status-bar ' + (type || 'info');
+  el.textContent = msg;
+}
+function clearStatus() {
+  document.getElementById('status-bar').className = 'status-bar';
+}
+
+/* ── Chart defaults ───────────────────────────────────────────── */
+Chart.defaults.color = '#8b949e';
+Chart.defaults.borderColor = '#21262d';
+Chart.defaults.font.family = "-apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif";
+Chart.defaults.font.size = 11;
+Chart.defaults.plugins.tooltip.enabled = false;
+const GRID = { color: '#21262d', tickColor: 'transparent' };
+const ADAPTOPTS = { locale: 'en-NZ' };
+
+// Pinned axis widths so the swell and tide plot areas match exactly
+// (swell has two right-hand axes; tide pads its right edge to compensate).
+const LEFT_AXIS_W  = 56;   // left "x.x m" axis, both charts
+const RIGHT_AXES_W = 62;   // swell: seconds axis (34) + compass axis (28)
+
+/* ── "Now" vertical line — drawn on every time-axis chart ─────── */
+Chart.register({
+  id: 'nowLine',
+  afterRender(chart) {
+    const xScale = chart.scales.x;
+    if (!xScale || xScale.type !== 'time') return;
+    const x = xScale.getPixelForValue(Date.now());
+    // Allow a few px of overflow so the line shows even when "now" is at the
+    // rightmost edge of the chart (e.g. the wind 24 h window ends at "now").
+    if (x < xScale.left || x > xScale.right + 4) return;
+    const { ctx, chartArea } = chart;
+    ctx.save();
+    ctx.beginPath();
+    ctx.moveTo(x, chartArea.top);
+    ctx.lineTo(x, chartArea.bottom);
+    ctx.strokeStyle = 'rgba(230,180,0,0.75)';
+    ctx.lineWidth = 2.5;
+    ctx.stroke();
+    ctx.restore();
+  }
+});
+
+/* ── Today's local-midnight-to-midnight bounds (swell + tide share these
+      so their time axes align exactly) ─────────────────────────── */
+function todayBounds() {
+  const day0 = DateTime.now().setZone(CONFIG.TIMEZONE).startOf('day');
+  return { min: day0.toMillis(), max: day0.plus({ days: 1 }).toMillis() };
+}
+
+/* ── Sunrise/sunset vertical lines ────────────────────────────────
+   Times computed by updateSunBadge() (same solar math as the station).
+   Drawn only on charts that opt in via options.showSunLines. */
+let _sunTimes = null;   // { riseMs, setMs } — set by updateSunBadge()
+
+Chart.register({
+  id: 'sunLines',
+  afterRender(chart) {
+    if (!chart.options.showSunLines || !_sunTimes) return;
+    const xScale = chart.scales.x;
+    if (!xScale || xScale.type !== 'time') return;
+    const { ctx, chartArea } = chart;
+    [[_sunTimes.riseMs, '☀'], [_sunTimes.setMs, '☾']].forEach(([ms, glyph]) => {
+      if (!ms) return;
+      const x = xScale.getPixelForValue(ms);
+      if (x < xScale.left || x > xScale.right) return;
+      ctx.save();
+      ctx.beginPath();
+      ctx.setLineDash([4, 4]);
+      ctx.moveTo(x, chartArea.top + 12);
+      ctx.lineTo(x, chartArea.bottom);
+      ctx.strokeStyle = 'rgba(210,168,60,0.45)';   // light, unobtrusive
+      ctx.lineWidth = 1;
+      ctx.stroke();
+      ctx.setLineDash([]);
+      ctx.font = '10px -apple-system, sans-serif';
+      ctx.fillStyle = 'rgba(210,168,60,0.9)';
+      ctx.textAlign = 'center';
+      ctx.fillText(glyph, x, chartArea.top + 9);
+      ctx.restore();
+    });
+  }
+});
+
+function timeScaleOpts(unit, fmt, pinToNow) {
+  const opts = {
+    type: 'time',
+    adapters: { date: { zone: CONFIG.TIMEZONE } },
+    time: { unit: unit, displayFormats: { hour: fmt || 'ha', day: 'EEE d' } },
+    grid: GRID,
+    ticks: { maxTicksLimit: 6, maxRotation: 0 },
+  };
+  // Extend the axis to the current moment so the NOW line always appears
+  // even when the last data point is hours in the past.
+  if (pinToNow) opts.max = Date.now();
+  return opts;
+}
+
+let charts = {};
+function destroyChart(id) { if (charts[id]) { charts[id].destroy(); delete charts[id]; } }
+
+/* ── Wind range selector ──────────────────────────────────────── */
+// Cached wind data so we can re-render without re-fetching
+let _lastWindData = null;
+
+// Restore persisted range preference, default to full CONFIG window
+let windHours = parseInt(localStorage.getItem('windHours') || 6, 10);
+if (![1, 6, 24, 48].includes(windHours)) windHours = 6;   // migrate old stored values (e.g. 4)
+
+function setWindRange(h) {
+  windHours = h;
+  localStorage.setItem('windHours', h);
+  // Update button active states
+  document.querySelectorAll('#wind-range-btns .range-btn').forEach(btn => {
+    btn.classList.toggle('active', parseInt(btn.dataset.h) === h);
+  });
+  // Render immediately from whatever's cached...
+  if (_lastWindData) renderWindChart(_lastWindData);
+  // ...and if a long view needs history we don't have fresh, fetch the
+  // decimated coarse layer in the background and re-render when it lands.
+  if (h > DETAIL_HOURS && Date.now() - _coarseAt > COARSE_TTL_MS) {
+    fetchWindRange(CONFIG.WIND_HOURS, COARSE_STEP_S)
+      .then(pts => { mergeWind(pts); _coarseAt = Date.now(); renderWindChart(_windCache); })
+      .catch(err => console.error('Coarse wind fetch failed:', err));
+  }
+}
+
+// Apply persisted range on load (runs after DOM ready via init)
+function applyInitialWindRange() {
+  document.querySelectorAll('#wind-range-btns .range-btn').forEach(btn => {
+    btn.classList.toggle('active', parseInt(btn.dataset.h) === windHours);
+  });
+}
+
+/* ── Moving average helper ────────────────────────────────────── */
+// Returns an array of trailing moving averages over `window` samples.
+// Points at the start of the series use whatever samples are available.
+function movingAvg(values, window) {
+  return values.map((_, i) => {
+    const slice = values.slice(Math.max(0, i - window + 1), i + 1);
+    const avg = slice.reduce((s, v) => s + parseFloat(v), 0) / slice.length;
+    return parseFloat(avg.toFixed(1));
+  });
+}
+const MA_WINDOW = 10; // 10-minute moving average (assumes 1 reading/min)
+
+/* ── Wind chart (speed + direction combined) ──────────────────── */
+function renderWindChart(data) {
+  _lastWindData = data;   // cache for range re-renders
+  destroyChart('wind');
+  destroyChart('dir');    // clean up old standalone dir chart if present
+  const ctx = document.getElementById('chart-wind').getContext('2d');
+  const labels = data.map(d => d.t);
+
+  // Speed datasets (right axis yS)
+  const raw     = data.map(d => toDisplaySpeed(d.ws));
+  const ma      = movingAvg(raw, MA_WINDOW);
+  const rawGust = data.map(d => toDisplaySpeed(d.wmax));
+  const gust    = movingAvg(rawGust, MA_WINDOW);
+
+  // Direction dataset (left axis yD) — insert null gaps on >180° wraps
+  const active = data.filter(d => d.wmax > 0);
+  const dirData = [];
+  for (let i = 0; i < active.length; i++) {
+    if (i > 0 && Math.abs(active[i].wd - active[i-1].wd) > 180) {
+      dirData.push({ x: active[i].t, y: null });
+    }
+    dirData.push({ x: active[i].t, y: active[i].wd });
+  }
+
+  const windowStart = Date.now() - windHours * 3600e3;
+  const xAxis = Object.assign(timeScaleOpts('hour', null, true), {
+    min: windowStart,
+  });
+
+  // Speed axis scaling:
+  //   1h & 4h  — tight auto-scale to the visible data (detail views)
+  //   24h/48h  — fixed 0–30 kt so days are visually comparable at a glance;
+  //              the axis only stretches upward when data exceeds 30 kt.
+  const visibleGust = gust.filter((_, i) => new Date(labels[i]).getTime() >= windowStart);
+  const visibleMa   = ma.filter((_, i)   => new Date(labels[i]).getTime() >= windowStart);
+  const visibleSpeeds = [...visibleGust, ...visibleMa].filter(v => v != null && isFinite(v));
+  const CAP = parseFloat(toDisplaySpeed(30));   // 30 kt in the display unit
+  let yMin, yMax;
+  if (windHours <= 6) {   // 1h & 6h: tight auto-scale; 24/48h: fixed 0–30 kt
+    yMin = visibleSpeeds.length ? Math.min(...visibleSpeeds) : 0;
+    yMax = visibleSpeeds.length ? Math.max(...visibleSpeeds) : CAP;
+  } else {
+    yMin = 0;
+    const dataMax = visibleSpeeds.length ? Math.max(...visibleSpeeds) : 0;
+    yMax = Math.max(CAP, Math.ceil(dataMax * 1.05));  // grow past 30 kt only when needed
+  }
+
+  charts.wind = new Chart(ctx, {
+    type: 'line',
+    data: {
+      labels,
+      datasets: [
+        // Direction — left axis, drawn behind speed lines
+        {
+          label: 'Direction',
+          data: dirData,
+          yAxisID: 'yD',
+          borderColor: '#a371f7',
+          backgroundColor: 'rgba(163,113,247,0.08)',
+          borderWidth: 1.5,
+          pointRadius: 0,
+          tension: 0.3,
+          fill: false,
+          spanGaps: false,
+          order: 3,
+        },
+        // Gust — right axis
+        {
+          label: 'Gust',
+          data: gust,
+          yAxisID: 'yS',
+          borderColor: '#f0883e',
+          borderWidth: 1.5,
+          pointRadius: 0,
+          tension: 0.4,
+          fill: false,
+          order: 2,
+        },
+        // 10m MA — right axis
+        {
+          label: '10m MA',
+          data: ma,
+          yAxisID: 'yS',
+          borderColor: '#58a6ff',
+          backgroundColor: 'rgba(88,166,255,0.12)',
+          borderWidth: 2,
+          pointRadius: 0,
+          tension: 0.4,
+          fill: 'origin',
+          order: 1,
+        },
+      ]
+    },
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      interaction: { mode: 'index', intersect: false },
+      plugins: {
+        legend: { display: false },
+        tooltip: {
+          callbacks: {
+            label: ctx => {
+              if (ctx.dataset.label === 'Direction') {
+                const deg = ctx.parsed.y;
+                return deg != null ? `Dir: ${deg}° ${deg2dir(deg)}` : '';
+              }
+              return `${ctx.dataset.label}: ${ctx.parsed.y} ${unitLabel()}`;
+            }
+          }
+        }
+      },
+      scales: {
+        x: xAxis,
+        // Left axis — direction (0–360, compass labels)
+        yD: {
+          position: 'left',
+          grid: GRID,
+          min: 0,
+          max: 360,
+          afterBuildTicks: axis => {
+            axis.ticks = [0,45,90,135,180,225,270,315,360].map(v => ({ value: v }));
+          },
+          ticks: {
+            maxRotation: 0,
+            callback: v => {
+              const map = {0:'N',45:'NE',90:'E',135:'SE',180:'S',225:'SW',270:'W',315:'NW',360:'N'};
+              return map[v] !== undefined ? map[v] : '';
+            }
+          }
+        },
+        // Right axis — wind speed (auto-scaled to visible window)
+        yS: {
+          position: 'right',
+          grid: { drawOnChartArea: false },
+          min: yMin,
+          max: yMax,
+          ticks: {
+            callback: v => v + ' ' + unitLabel(),
+            maxTicksLimit: 5,
+          }
+        }
+      }
+    }
+  });
+}
+
+// Kept as a no-op stub so any stale call sites don't throw
+function renderDirChart(data) {}
+
+/* ── Swell chart ──────────────────────────────────────────────── */
+function renderSwellChart(times, heights, periods, directions) {
+  destroyChart('swell');
+  const ctx = document.getElementById('chart-swell').getContext('2d');
+
+  // Today, local midnight → midnight — identical to the tide chart so the
+  // two time axes line up exactly.
+  const xAxis = Object.assign(timeScaleOpts('hour'), todayBounds());
+
+  charts.swell = new Chart(ctx, {
+    type: 'line',
+    data: {
+      labels: times,
+      datasets: [
+        {
+          label: 'Height (m)',
+          data: heights,
+          borderColor: '#3fb950',
+          backgroundColor: 'rgba(63,185,80,0.15)',
+          borderWidth: 2,
+          pointRadius: 0,
+          tension: 0.4,
+          fill: 'origin',
+          yAxisID: 'yH',
+          order: 1,
+        },
+        {
+          label: 'Period (s)',
+          data: periods,
+          borderColor: '#58a6ff',
+          borderWidth: 1.5,
+          borderDash: [4,2],
+          pointRadius: 0,
+          tension: 0.4,
+          fill: false,
+          yAxisID: 'yP',   // hidden axis — line still shows
+          order: 2,
+        },
+        {
+          label: 'Direction',
+          data: directions,
+          borderColor: 'rgba(210,153,255,0.75)',
+          borderWidth: 1.5,
+          pointRadius: 0,
+          tension: 0.3,
+          fill: false,
+          yAxisID: 'yD',
+          order: 3,
+        }
+      ]
+    },
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      showSunLines: true,
+      plugins: {
+          legend: { display: false }
+        },
+      scales: {
+        x: xAxis,
+        // Axis widths are PINNED (afterFit) so the plot area — and therefore
+        // the time axis — lines up pixel-for-pixel with the tide chart below.
+        // Tide compensates for the two right axes with layout padding.
+        // Shared constants: LEFT_AXIS_W / RIGHT_AXES_W.
+        yH: {
+          grid: GRID,
+          beginAtZero: true,
+          position: 'left',
+          afterFit: a => { a.width = LEFT_AXIS_W; },
+          ticks: { maxTicksLimit: 4, callback: v => v.toFixed(1) + ' m' }
+        },
+        yP: {
+          grid: { display: false },
+          beginAtZero: true,
+          position: 'right',
+          afterFit: a => { a.width = 34; },
+          ticks: { maxTicksLimit: 4, callback: v => v + ' s' }
+        },
+        yD: {
+          grid: { display: false },
+          min: 0,
+          max: 360,
+          position: 'right',
+          afterFit: a => { a.width = RIGHT_AXES_W - 34; },
+          // Force exactly the 8 compass-point ticks so S, E & W always appear
+          afterBuildTicks: axis => {
+            axis.ticks = [0, 45, 90, 135, 180, 225, 270, 315, 360].map(v => ({ value: v }));
+          },
+          ticks: {
+            callback: v => {
+              const map = {0:'N',45:'NE',90:'E',135:'SE',180:'S',225:'SW',270:'W',315:'NW',360:'N'};
+              return map[v] !== undefined ? map[v] : '';
+            }
+          }
+        }
+      }
+    }
+  });
+}
+
+/* ── Tide chart ───────────────────────────────────────────────── */
+function renderTideChart(times, heights, nowIso) {
+  destroyChart('tide');
+  const ctx = document.getElementById('chart-tide').getContext('2d');
+
+  // Vertical "now" line annotation via a dummy dataset
+  const nowMs = new Date(nowIso).getTime();
+  const minH  = Math.min(...heights);
+  const maxH  = Math.max(...heights);
+
+  charts.tide = new Chart(ctx, {
+    type: 'line',
+    data: {
+      labels: times,
+      datasets: [
+        {
+          label: 'Tide (m)',
+          data: heights,
+          borderColor: '#f0883e',
+          backgroundColor: 'rgba(240,136,62,0.15)',
+          borderWidth: 2,
+          pointRadius: 0,
+          tension: 0.4,
+          fill: 'origin',
+        }
+      ]
+    },
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      showSunLines: true,
+      interaction: { mode: 'index', intersect: false },
+      // Right padding mirrors the swell chart's two right-hand axes so both
+      // plot areas are identical and the time axes align vertically.
+      layout: { padding: { right: RIGHT_AXES_W } },
+      plugins: {
+        legend: { display: false },
+        annotation: undefined, // no annotation plugin loaded; we draw manually
+      },
+      scales: {
+        x: Object.assign(timeScaleOpts('hour', 'ha'), todayBounds()),
+        y: {
+          grid: GRID,
+          afterFit: a => { a.width = LEFT_AXIS_W; },
+          ticks: { maxTicksLimit: 4, callback: v => v.toFixed(1) + ' m' }
+        }
+      }
+    }
+  });
+}
+
+/* ── Wind data: layered fetch strategy ────────────────────────────
+   The 1-minute auto-refresh only ever fetches DETAIL_HOURS of full-res
+   data (fast — keeps the latest card/badges live). The long 24h/48h
+   history is fetched ON DEMAND, server-decimated to COARSE_STEP_S
+   buckets (night rows are sparser than the bucket, so they all survive),
+   cached and merged underneath. Full-res detail always wins on overlap. */
+const DETAIL_HOURS   = 6;        // full-resolution window, every refresh
+const COARSE_STEP_S  = 300;      // 5-min buckets for the long views
+const COARSE_TTL_MS  = 10 * 60e3; // re-fetch coarse layer after this
+
+let _windCache = [];             // merged points, ascending by time
+let _coarseAt  = 0;              // when the coarse layer was last fetched
+
+async function fetchWindRange(hours, stepS) {
+  const url = `${CONFIG.GAS_URL}?cmd=get_data&hours=${hours}` +
+              (stepS ? `&step=${stepS}` : '');
+  const r = await fetch(url);
+  if (!r.ok) throw new Error(`GAS HTTP ${r.status}`);
+  const j = await r.json();
+  if (!j.ok) throw new Error(j.error || 'GAS error');
+  // Sort ascending so [length-1] is ALWAYS the newest (2026-07 lesson).
+  return (j.data || []).sort((a, b) => new Date(a.t) - new Date(b.t));
+}
+
+function mergeWind(points) {
+  const byT = new Map(_windCache.map(p => [p.t, p]));
+  points.forEach(p => byT.set(p.t, p));
+  const floor = Date.now() - (CONFIG.WIND_HOURS + 1) * 3600e3;   // trim old
+  _windCache = [...byT.values()]
+    .filter(p => new Date(p.t).getTime() >= floor)
+    .sort((a, b) => new Date(a.t) - new Date(b.t));
+}
+
+async function loadWind() {
+  const wantCoarse = windHours > DETAIL_HOURS &&
+                     (Date.now() - _coarseAt > COARSE_TTL_MS);
+  const jobs = [fetchWindRange(DETAIL_HOURS, 0)];
+  if (wantCoarse) jobs.push(fetchWindRange(CONFIG.WIND_HOURS, COARSE_STEP_S));
+  const res = await Promise.all(jobs);
+  if (res[1]) { mergeWind(res[1]); _coarseAt = Date.now(); }
+  mergeWind(res[0]);   // detail second: full-res wins on overlapping times
+  return _windCache;
+}
+
+/* ── Fetch swell from Open-Meteo Marine (free, no key) ────────── */
+async function fetchSwell() {
+  const url = [
+    'https://marine-api.open-meteo.com/v1/marine',
+    `?latitude=${CONFIG.LAT}&longitude=${CONFIG.LNG}`,
+    '&hourly=wave_height,wave_period,wave_direction,sea_surface_temperature',
+    `&timezone=${encodeURIComponent(CONFIG.TIMEZONE)}`,
+    '&past_days=1&forecast_days=2',
+  ].join('');
+  const r = await fetch(url);
+  if (!r.ok) throw new Error(`Open-Meteo HTTP ${r.status}`);
+  return r.json();
+}
+
+/* ── Fetch current air temperature (Open-Meteo, free, no key) ─── */
+async function fetchAirTemp() {
+  const url = `https://api.open-meteo.com/v1/forecast?latitude=${CONFIG.LAT}&longitude=${CONFIG.LNG}` +
+              `&current=temperature_2m&timezone=${encodeURIComponent(CONFIG.TIMEZONE)}`;
+  const r = await fetch(url);
+  if (!r.ok) throw new Error(`Open-Meteo HTTP ${r.status}`);
+  const j = await r.json();
+  return (j.current && isFinite(j.current.temperature_2m)) ? j.current.temperature_2m : null;
+}
+
+/* ── Fetch tides from NIWA ────────────────────────────────────── */
+async function fetchTides() {
+  if (!CONFIG.NIWA_KEY) return null;
+  // Start from yesterday so the chart's −12 h window is filled with tide history
+  const yesterday = DateTime.now().setZone(CONFIG.TIMEZONE).minus({ days: 1 }).toISODate();
+  const url = [
+    'https://api.niwa.co.nz/tides/data',
+    `?lat=${CONFIG.LAT}&long=${CONFIG.LNG}`,
+    '&numberOfDays=3',
+    `&startDate=${yesterday}`,
+    '&datum=MSL',
+    `&apikey=${CONFIG.NIWA_KEY}`,
+  ].join('');
+  const r = await fetch(url);
+  if (!r.ok) throw new Error(`NIWA HTTP ${r.status}`);
+  return r.json();
+}
+
+// Use Luxon for robust ISO parsing — new Date() can silently return NaN on
+// timestamps with timezone offsets like "2026-03-27T00:00:00+13:00".
+function tideMs(isoStr) {
+  return DateTime.fromISO(isoStr).toMillis();
+}
+
+/* ── Tide phase label ─────────────────────────────────────────── */
+function nextTideEvent(times, heights) {
+  const nowMs = Date.now();
+
+  // Build a list of all HT/LT turning points from the NIWA data
+  const events = [];
+  for (let i = 1; i < times.length - 1; i++) {
+    const isHigh = heights[i] >= heights[i-1] && heights[i] >= heights[i+1];
+    const isLow  = heights[i] <= heights[i-1] && heights[i] <= heights[i+1];
+    if (isHigh || isLow)
+      events.push({ t: tideMs(times[i]), h: heights[i], type: isHigh ? 'HT' : 'LT' });
+  }
+  if (events.length < 2) return '–';
+
+  // Find the turning points immediately before and after now
+  let prevIdx = -1, nextIdx = -1;
+  for (let i = 0; i < events.length; i++) {
+    if (events[i].t <= nowMs) prevIdx = i;
+    else if (nextIdx === -1) nextIdx = i;
+  }
+  if (prevIdx === -1 || nextIdx === -1) return '–';
+
+  const prev = events[prevIdx];
+  const next = events[nextIdx];
+
+  // Format a duration in milliseconds as "Xh Ym" or "Ym"
+  const fmt = ms => {
+    const m = Math.round(Math.abs(ms) / 60000);
+    const h = Math.floor(m / 60), mins = m % 60;
+    return h > 0 ? `${h}h ${mins}m` : `${mins}m`;
+  };
+
+  // Split the period at the midpoint — first half shows "Xh Ym after PREV",
+  // second half shows "Xh Ym until NEXT"
+  const midMs = (prev.t + next.t) / 2;
+  if (nowMs < midMs) {
+    return `${fmt(nowMs - prev.t)} after ${prev.type}`;
+  } else {
+    return `${fmt(next.t - nowMs)} until ${next.type}`;
+  }
+}
+
+/* ── Current tide height & trend ─────────────────────────────── */
+function currentTideInfo(times, heights) {
+  const nowMs = Date.now();
+
+  // Find the samples immediately before and after now by actual timestamp,
+  // regardless of whether the NIWA data is sorted chronologically or not.
+  let before = -1, after = -1;
+  for (let i = 0; i < times.length; i++) {
+    const t = tideMs(times[i]);
+    if (t <= nowMs) {
+      if (before === -1 || t > tideMs(times[before])) before = i;
+    } else {
+      if (after  === -1 || t < tideMs(times[after]))  after  = i;
+    }
+  }
+
+  // Interpolate height at the exact current moment
+  let h;
+  if (before !== -1 && after !== -1) {
+    const t0 = tideMs(times[before]), t1 = tideMs(times[after]);
+    const frac = (nowMs - t0) / (t1 - t0);
+    h = heights[before] + frac * (heights[after] - heights[before]);
+  } else {
+    h = before !== -1 ? heights[before] : heights[after];
+  }
+
+  // Rising if the next real sample is higher than the previous real sample
+  const rising = before !== -1 && after !== -1 && heights[after] > heights[before];
+  return { h, trend: rising ? '↑ Rising' : '↓ Falling', icon: rising ? '🌊' : '🏖️' };
+}
+
+/* ── Update current conditions cards ─────────────────────────── */
+function updateWindCard(data) {
+  if (!data || !data.length) return;
+  const latest = data[data.length - 1];
+  // Speed card shows 10-min moving average of the raw avg speed
+  const raw10 = data.slice(-MA_WINDOW).map(d => parseFloat(toDisplaySpeed(d.ws)));
+  const ma10  = (raw10.reduce((s, v) => s + v, 0) / raw10.length).toFixed(1);
+  // Rotate needle to wind-TO bearing (+180° from meteorological FROM convention)
+  // Arrow tip points in the direction the wind is blowing toward
+  const toDir = (latest.wd + 180) % 360;
+  document.getElementById('wind-needle').setAttribute('transform', `rotate(${toDir})`);
+  // Speed & unit in centre of SVG dial
+  const ma10Num = parseFloat(ma10);
+  const speedColour = ma10Num > 15 ? '#3fb950' : ma10Num >= 10 ? '#f0883e' : '#f85149';
+  const speedEl = document.getElementById('wind-speed');
+  speedEl.textContent = ma10;
+  speedEl.setAttribute('fill', speedColour);
+  document.getElementById('wind-unit').textContent = unitLabel();
+  const rawGusts = data.slice(-MA_WINDOW).map(d => parseFloat(toDisplaySpeed(d.wmax)));
+  const maGust   = (rawGusts.reduce((s, v) => s + v, 0) / rawGusts.length).toFixed(1);
+  document.getElementById('wind-gust').textContent      = maGust;
+  // Show "FROM NNE" so the text stays unambiguous alongside the downwind arrow
+  const fromLabel = latest.wdt || deg2dir(latest.wd);
+  document.getElementById('wind-dir-text').textContent  = 'from ' + fromLabel;
+
+  updateBatteryBadge(latest);
+}
+
+// ── Sunrise/sunset badge ──────────────────────────────────────────────────
+// Same NOAA solar-position math the station firmware uses for its day/night
+// switching, computed client-side for CONFIG.LAT/LNG — no API needed.
+// Shows actual sunrise/sunset (sun at −0.833°, standard refraction+disc).
+// Note: the STATION switches modes at civil twilight (−6°), ~25–30 min
+// beyond these times, so day-mode data outlasts the badge times slightly.
+function solarElevDeg(epochS) {
+  const rad = Math.PI / 180;
+  const n    = epochS / 86400 - 10957.5;                    // days since J2000
+  const L    = (280.460 + 0.9856474 * n) % 360;
+  const g    = ((357.528 + 0.9856003 * n) % 360) * rad;
+  const lam  = (L + 1.915 * Math.sin(g) + 0.020 * Math.sin(2 * g)) * rad;
+  const eps  = 23.439 * rad;
+  const delta = Math.asin(Math.sin(eps) * Math.sin(lam));
+  const ra    = Math.atan2(Math.cos(eps) * Math.sin(lam), Math.cos(lam));
+  const gmst  = (280.46061837 + 360.98564736629 * n) % 360;
+  const H     = ((gmst + CONFIG.LNG) % 360) * rad - ra;
+  const lat   = CONFIG.LAT * rad;
+  return Math.asin(Math.sin(lat) * Math.sin(delta) +
+                   Math.cos(lat) * Math.cos(delta) * Math.cos(H)) / rad;
+}
+
+function updateSunBadge() {
+  const el = document.getElementById('sun-badge');
+  if (!el) return;
+  const day0 = DateTime.now().setZone(CONFIG.TIMEZONE).startOf('day');
+  const base = day0.toSeconds();
+  let rise = null, set = null;
+  let prev = solarElevDeg(base);
+  for (let m = 1; m < 1440; m++) {              // 1-min scan of today, trivial cost
+    const e = solarElevDeg(base + m * 60);
+    if (prev < -0.833 && e >= -0.833) rise = day0.plus({ minutes: m });
+    if (prev >= -0.833 && e < -0.833) set  = day0.plus({ minutes: m });
+    prev = e;
+  }
+  document.getElementById('sun-rise').textContent = rise ? rise.toFormat('HH:mm') + '↑' : '–';
+  document.getElementById('sun-set').textContent  = set  ? '· ' + set.toFormat('HH:mm') + '↓' : '';
+  _sunTimes = { riseMs: rise ? rise.toMillis() : null,
+                setMs:  set  ? set.toMillis()  : null };   // for chart sun lines
+}
+
+/* ── Battery history page ─────────────────────────────────────────
+   Opened by tapping the battery badge. 7 days of voltage + percent,
+   10-min server-side decimation (~1000 points), auto-scaled axes,
+   pinch/scroll zoom + drag pan (chartjs-plugin-zoom). Fullscreen +
+   landscape lock is attempted — Android honours it; iOS ignores the
+   lock, so rotate the phone there. */
+let _battData = null, _battAt = 0;
+
+// Belt-and-braces: attach the handler in JS too (inline onclick is also set),
+// and make sure the zoom plugin is registered (its auto-registration varies
+// between builds; double-registering is harmless).
+window.addEventListener('DOMContentLoaded', () => {
+  const b = document.getElementById('batt-badge');
+  if (b) b.addEventListener('click', openBatteryPage);
+  try { if (window.ChartZoom) Chart.register(window.ChartZoom); } catch (_) {}
+});
+
+async function openBatteryPage() {
+  const page = document.getElementById('batt-page');
+  page.style.display = 'flex';
+  try {                                   // best-effort landscape fullscreen
+    await page.requestFullscreen();
+    await screen.orientation.lock('landscape');
+  } catch (_) { /* iOS / unsupported — rotate manually */ }
+
+  updateBootInfo();   // fetches in parallel with the battery data
+
+  const note = document.getElementById('batt-page-note');
+  if (!_battData || Date.now() - _battAt > 10 * 60e3) {
+    note.textContent = 'loading 7 days…';
+    try {
+      _battData = await fetchWindRange(168, 600);   // 7 days, 10-min buckets
+      _battAt = Date.now();
+    } catch (e) {
+      note.textContent = 'load failed — check connection';
+      return;
+    }
+  }
+  note.textContent = 'pinch / scroll to zoom · drag to pan';
+  renderBattChart(_battData);
+}
+
+function closeBatteryPage() {
+  destroyChart('batt');
+  document.getElementById('batt-page').style.display = 'none';
+  try { screen.orientation.unlock(); } catch (_) {}
+  if (document.fullscreenElement) document.exitFullscreen().catch(() => {});
+}
+
+function resetBattZoom() { if (charts.batt) charts.batt.resetZoom(); }
+
+// Latest boot line for the health page. A recent unexpected boot is the #1
+// "something happened" signal, so it gets glanced at alongside the battery.
+async function updateBootInfo() {
+  const el = document.getElementById('boot-info');
+  try {
+    const r = await fetch(`${CONFIG.GAS_URL}?cmd=get_boot&limit=2`);
+    const j = await r.json();
+    if (!j.ok || !j.boots || !j.boots.length) { el.textContent = 'no boot events recorded'; return; }
+    const b = j.boots[0];
+    let line = `Last boot: ${b.t} · ${b.fw} · ${b.mode} · ${b.cpu} MHz · ` +
+               `LTE ${b.lte} · MQTT ${b.mqtt} · ${parseFloat(b.batt_v) ? parseFloat(b.batt_v).toFixed(2) + ' V · ' : ''}` +
+               `Reboot #${b.reboots}`;
+    if (j.boots[1]) line += `   (prev: ${j.boots[1].t})`;
+    el.textContent = line;
+  } catch (e) {
+    el.textContent = 'boot info unavailable';
+  }
+}
+
+function renderBattChart(data) {
+  destroyChart('batt');
+  const ctx = document.getElementById('chart-batt').getContext('2d');
+  const pts = data.filter(p => p.batt && p.batt > 0);
+  charts.batt = new Chart(ctx, {
+    type: 'line',
+    data: {
+      labels: pts.map(p => p.t),
+      datasets: [
+        { label: 'Voltage (V)', data: pts.map(p => p.batt), yAxisID: 'yV',
+          borderColor: '#3fb950', backgroundColor: 'rgba(63,185,80,0.08)',
+          borderWidth: 1.5, pointRadius: 0, tension: 0.2, fill: false },
+        { label: 'Charge (%)', data: pts.map(p => p.pct), yAxisID: 'yP',
+          borderColor: '#58a6ff', borderDash: [5, 3],
+          borderWidth: 1.5, pointRadius: 0, tension: 0.2, fill: false },
+      ]
+    },
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      animation: false,
+      interaction: { mode: 'index', intersect: false },
+      plugins: {
+        legend: { display: true, labels: { color: '#c9d1d9', boxWidth: 16 } },
+        tooltip: {   // tooltips are globally off; enable for this chart
+          enabled: true,
+          callbacks: {
+            label: c => c.dataset.yAxisID === 'yV'
+              ? ` ${c.parsed.y.toFixed(3)} V` : ` ${c.parsed.y.toFixed(1)} %`
+          }
+        },
+        zoom: {
+          pan:  { enabled: true, mode: 'x' },
+          zoom: { wheel: { enabled: true }, pinch: { enabled: true }, mode: 'x' }
+        }
+      },
+      scales: {
+        // No fixed unit — Chart.js picks day/hour granularity as you zoom
+        x: {
+          type: 'time',
+          adapters: { date: { zone: CONFIG.TIMEZONE } },
+          time: { displayFormats: { hour: 'EEE ha', day: 'EEE d' } },
+          grid: GRID,
+          ticks: { maxTicksLimit: 8, maxRotation: 0 }
+        },
+        yV: {   // auto-scaled voltage, left
+          position: 'left',
+          grid: GRID,
+          ticks: { color: '#3fb950', maxTicksLimit: 6, callback: v => v.toFixed(2) + ' V' }
+        },
+        yP: {   // auto-scaled percent, right
+          position: 'right',
+          grid: { drawOnChartArea: false },
+          ticks: { color: '#58a6ff', maxTicksLimit: 6, callback: v => v + '%' }
+        }
+      }
+    }
+  });
+}
+
+// Header battery badge — voltage-coloured (the firmware makes its survival
+// decisions on voltage; the MAX17048 percent is indicative only).
+function updateBatteryBadge(latest) {
+  const badge = document.getElementById('batt-badge');
+  if (!badge) return;
+  const v   = parseFloat(latest.batt);
+  const pct = parseFloat(latest.pct);
+  if (!v || v <= 0) {                       // no gauge data in the latest point
+    document.getElementById('batt-volt').textContent = 'n/a';
+    document.getElementById('batt-pct').textContent  = '';
+    badge.className = 'batt-badge';
+    return;
+  }
+  document.getElementById('batt-volt').textContent = v.toFixed(2) + 'V';
+  document.getElementById('batt-pct').textContent  =
+    (pct && pct > 0) ? '·' + Math.round(pct) + '%' : '';
+  badge.className = 'batt-badge ' +
+    (v >= 3.70 ? 'batt-ok' : v >= 3.50 ? 'batt-low' : 'batt-crit');
+  badge.title = 'Station battery (latest report)' +
+    (v < 3.50 ? ' — nearing survival cutoff (3.30 V)' : '');
+}
+
+function updateSwellCard(swell) {
+  const now = new Date().toISOString();
+  const times = swell.hourly.time;
+  let best = 0;
+  for (let i = 0; i < times.length; i++) {
+    if (Math.abs(new Date(times[i]) - new Date(now)) <
+        Math.abs(new Date(times[best]) - new Date(now))) best = i;
+  }
+  document.getElementById('swell-height').textContent = swell.hourly.wave_height[best].toFixed(1);
+  document.getElementById('swell-period').textContent = swell.hourly.wave_period[best].toFixed(0);
+  const d = swell.hourly.wave_direction[best];
+  document.getElementById('swell-dir').textContent    = deg2dir(d) + ' ' + Math.round(d) + '°';
+
+  // Sea surface temperature — same Open-Meteo marine call, nearest hour.
+  // Model data (not a buoy), so treat as indicative ±0.5–1 °C.
+  const sstArr = swell.hourly.sea_surface_temperature;
+  const sst = sstArr ? sstArr[best] : null;
+  document.getElementById('sea-temp-v').textContent =
+    (sst !== null && sst !== undefined && isFinite(sst)) ? `${sst.toFixed(1)}°` : '–';
+}
+
+function updateTideCard(times, heights) {
+  const info = currentTideInfo(times, heights);
+  const next = nextTideEvent(times, heights);
+  document.getElementById('tide-height').textContent   = info.h.toFixed(1);
+  document.getElementById('tide-trend').textContent    = info.trend;
+  document.getElementById('tide-next').textContent     = next;
+  document.getElementById('tide-arrow-icon').textContent = info.icon;
+
+  // Colour-code tide height: find nearest HW (peak) and measure minutes away
+  const nowMs = Date.now();
+  let minMinsToHW = Infinity;
+  for (let i = 1; i < times.length - 1; i++) {
+    const isHigh = heights[i] >= heights[i-1] && heights[i] >= heights[i+1];
+    if (isHigh) {
+      const minsAway = Math.abs(tideMs(times[i]) - nowMs) / 60000;
+      if (minsAway < minMinsToHW) minMinsToHW = minsAway;
+    }
+  }
+  document.getElementById('tide-height').style.color =
+    minMinsToHW <= 60  ? '#3fb950' :   // green  — within 1 hr of HW
+    minMinsToHW <= 120 ? '#f0883e' :   // orange — within 2 hrs
+                         '#f85149';    // red    — more than 2 hrs away
+}
+
+/* ── Main load function ───────────────────────────────────────── */
+async function loadAll() {
+  const btn = document.getElementById('refresh-btn');
+  btn.classList.add('spinning');
+  clearStatus();
+  updateSunBadge();   // pure local math — refreshes across midnight automatically
+
+  const now = DateTime.now().setZone(CONFIG.TIMEZONE);
+  document.getElementById('updated-time').textContent = 'Loading…';
+  document.getElementById('footer-coords').textContent =
+    `${Math.abs(CONFIG.LAT).toFixed(4)}°S ${CONFIG.LNG.toFixed(4)}°E`;
+
+  // Fetch all sources in parallel; handle each independently
+  const [windResult, swellResult, tideResult, airResult] = await Promise.allSettled([
+    loadWind(),
+    fetchSwell(),
+    fetchTides(),
+    fetchAirTemp(),
+  ]);
+
+  /* Air temperature (header temp badge) — model value, indicative */
+  document.getElementById('air-temp-v').textContent =
+    (airResult.status === 'fulfilled' && airResult.value != null)
+      ? `${airResult.value.toFixed(1)}°` : '–';
+
+  const errors = [];
+
+  /* Wind */
+  if (windResult.status === 'fulfilled' && windResult.value && windResult.value.length) {
+    const data = windResult.value;
+    updateWindCard(data);
+    renderWindChart(data);   // also sets _lastWindData
+    renderDirChart(data);
+    applyInitialWindRange(); // sync button highlight & dir badge
+  } else {
+    errors.push('Wind data unavailable — check GAS_URL in CONFIG');
+    console.error('Wind fetch error:', windResult.reason || 'no data');
+  }
+
+  /* Swell */
+  if (swellResult.status === 'fulfilled' && swellResult.value) {
+    const s = swellResult.value;
+    updateSwellCard(s);
+    renderSwellChart(s.hourly.time, s.hourly.wave_height, s.hourly.wave_period, s.hourly.wave_direction);
+  } else {
+    errors.push('Swell data unavailable (Open-Meteo)');
+    console.error('Swell fetch error:', swellResult.reason);
+  }
+
+  /* Tide */
+  if (tideResult.status === 'fulfilled' && tideResult.value) {
+    const t = tideResult.value;
+    const times   = t.values.map(v => v.time);
+    const heights = t.values.map(v => v.value);
+    updateTideCard(times, heights);
+    renderTideChart(times, heights, new Date().toISOString());
+    document.getElementById('tide-wrap').style.display = '';
+    document.getElementById('tide-notice').style.display = 'none';
+  } else if (!CONFIG.NIWA_KEY) {
+    document.getElementById('tide-wrap').style.display = 'none';
+    document.getElementById('tide-notice').style.display = 'block';
+  } else {
+    errors.push('Tide data unavailable (NIWA API)');
+    console.error('Tide fetch error:', tideResult.reason);
+  }
+
+  /* Timestamp + status */
+  document.getElementById('updated-time').textContent =
+    'Updated ' + now.toFormat('h:mm a');
+
+  if (errors.length) {
+    setStatus('⚠ ' + errors.join(' · '), 'warning');
+  }
+
+  btn.classList.remove('spinning');
+}
+
+/* ── Auto-refresh ─────────────────────────────────────────────── */
+if (CONFIG.REFRESH_MIN > 0) {
+  setInterval(loadAll, CONFIG.REFRESH_MIN * 60 * 1000);
+}
+
+/* ── Boot ─────────────────────────────────────────────────────── */
+loadAll();
+</script>
+</body>
+</html>
