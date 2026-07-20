@@ -10,6 +10,9 @@
   <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/luxon/3.4.4/luxon.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/chartjs-adapter-luxon@1.3.1/dist/chartjs-adapter-luxon.umd.min.js"></script>
+  <!-- Pinch/scroll zoom for the battery history page -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/hammer.js/2.0.8/hammer.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/chartjs-plugin-zoom/2.0.1/chartjs-plugin-zoom.min.js"></script>
   <!-- Your personal config — edit config.js, never touch this file.
        Bump ?v= when config.js changes so cached copies refresh. -->
   <script src="config.js?v=2"></script>
@@ -309,7 +312,21 @@
   <div class="badge-strip">
     <div class="batt-badge" id="sun-badge" title="Today's sunrise / sunset at Burns Rock">☀️ <b id="sun-rise">–</b>&nbsp;<span id="sun-set">–</span></div>
     <div class="batt-badge" id="temp-badge" title="Air · sea temperature (Open-Meteo model)">🌡 <b id="air-temp-v">–</b>&nbsp;· 🌊 <b id="sea-temp-v">–</b></div>
-    <div class="batt-badge" id="batt-badge" title="Station battery (latest report)">🔋 <b id="batt-volt">–</b>&nbsp;<span id="batt-pct"></span></div>
+    <div class="batt-badge" id="batt-badge" title="Station battery — tap for 7-day history"
+         style="cursor:pointer;" onclick="openBatteryPage()">🔋 <b id="batt-volt">–</b>&nbsp;<span id="batt-pct"></span></div>
+  </div>
+
+  <!-- Battery history page — full-screen overlay, opened from the battery badge -->
+  <div id="batt-page" style="display:none; position:fixed; inset:0; z-index:50; background:#0d1117; flex-direction:column;">
+    <div style="display:flex; align-items:center; gap:10px; padding:10px 14px; border-bottom:1px solid #21262d;">
+      <button class="refresh-btn" onclick="closeBatteryPage()" title="Back" style="font-size:20px;">←</button>
+      <span style="font-weight:700; color:#f0f6fc;">🔋 Battery — last 7 days</span>
+      <span class="updated" id="batt-page-note" style="margin-left:auto;">pinch / scroll to zoom · drag to pan</span>
+      <button class="range-btn" onclick="resetBattZoom()">reset</button>
+    </div>
+    <div style="flex:1; min-height:0; padding:4px 10px 12px;">
+      <canvas id="chart-batt"></canvas>
+    </div>
   </div>
 
   <!-- Status bar -->
@@ -1152,6 +1169,106 @@ function updateSunBadge() {
   document.getElementById('sun-set').textContent  = set  ? '· ' + set.toFormat('HH:mm') + '↓' : '';
   _sunTimes = { riseMs: rise ? rise.toMillis() : null,
                 setMs:  set  ? set.toMillis()  : null };   // for chart sun lines
+}
+
+/* ── Battery history page ─────────────────────────────────────────
+   Opened by tapping the battery badge. 7 days of voltage + percent,
+   10-min server-side decimation (~1000 points), auto-scaled axes,
+   pinch/scroll zoom + drag pan (chartjs-plugin-zoom). Fullscreen +
+   landscape lock is attempted — Android honours it; iOS ignores the
+   lock, so rotate the phone there. */
+let _battData = null, _battAt = 0;
+
+async function openBatteryPage() {
+  const page = document.getElementById('batt-page');
+  page.style.display = 'flex';
+  try {                                   // best-effort landscape fullscreen
+    await page.requestFullscreen();
+    await screen.orientation.lock('landscape');
+  } catch (_) { /* iOS / unsupported — rotate manually */ }
+
+  const note = document.getElementById('batt-page-note');
+  if (!_battData || Date.now() - _battAt > 10 * 60e3) {
+    note.textContent = 'loading 7 days…';
+    try {
+      _battData = await fetchWindRange(168, 600);   // 7 days, 10-min buckets
+      _battAt = Date.now();
+    } catch (e) {
+      note.textContent = 'load failed — check connection';
+      return;
+    }
+  }
+  note.textContent = 'pinch / scroll to zoom · drag to pan';
+  renderBattChart(_battData);
+}
+
+function closeBatteryPage() {
+  destroyChart('batt');
+  document.getElementById('batt-page').style.display = 'none';
+  try { screen.orientation.unlock(); } catch (_) {}
+  if (document.fullscreenElement) document.exitFullscreen().catch(() => {});
+}
+
+function resetBattZoom() { if (charts.batt) charts.batt.resetZoom(); }
+
+function renderBattChart(data) {
+  destroyChart('batt');
+  const ctx = document.getElementById('chart-batt').getContext('2d');
+  const pts = data.filter(p => p.batt && p.batt > 0);
+  charts.batt = new Chart(ctx, {
+    type: 'line',
+    data: {
+      labels: pts.map(p => p.t),
+      datasets: [
+        { label: 'Voltage (V)', data: pts.map(p => p.batt), yAxisID: 'yV',
+          borderColor: '#3fb950', backgroundColor: 'rgba(63,185,80,0.08)',
+          borderWidth: 1.5, pointRadius: 0, tension: 0.2, fill: false },
+        { label: 'Charge (%)', data: pts.map(p => p.pct), yAxisID: 'yP',
+          borderColor: '#58a6ff', borderDash: [5, 3],
+          borderWidth: 1.5, pointRadius: 0, tension: 0.2, fill: false },
+      ]
+    },
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      animation: false,
+      interaction: { mode: 'index', intersect: false },
+      plugins: {
+        legend: { display: true, labels: { color: '#c9d1d9', boxWidth: 16 } },
+        tooltip: {   // tooltips are globally off; enable for this chart
+          enabled: true,
+          callbacks: {
+            label: c => c.dataset.yAxisID === 'yV'
+              ? ` ${c.parsed.y.toFixed(3)} V` : ` ${c.parsed.y.toFixed(1)} %`
+          }
+        },
+        zoom: {
+          pan:  { enabled: true, mode: 'x' },
+          zoom: { wheel: { enabled: true }, pinch: { enabled: true }, mode: 'x' }
+        }
+      },
+      scales: {
+        // No fixed unit — Chart.js picks day/hour granularity as you zoom
+        x: {
+          type: 'time',
+          adapters: { date: { zone: CONFIG.TIMEZONE } },
+          time: { displayFormats: { hour: 'EEE ha', day: 'EEE d' } },
+          grid: GRID,
+          ticks: { maxTicksLimit: 8, maxRotation: 0 }
+        },
+        yV: {   // auto-scaled voltage, left
+          position: 'left',
+          grid: GRID,
+          ticks: { color: '#3fb950', maxTicksLimit: 6, callback: v => v.toFixed(2) + ' V' }
+        },
+        yP: {   // auto-scaled percent, right
+          position: 'right',
+          grid: { drawOnChartArea: false },
+          ticks: { color: '#58a6ff', maxTicksLimit: 6, callback: v => v + '%' }
+        }
+      }
+    }
+  });
 }
 
 // Header battery badge — voltage-coloured (the firmware makes its survival
