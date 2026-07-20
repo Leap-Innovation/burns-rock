@@ -320,7 +320,7 @@
   <div id="batt-page" style="display:none; position:fixed; inset:0; z-index:50; background:#0d1117; flex-direction:column;">
     <div style="display:flex; align-items:center; gap:10px; padding:10px 14px; border-bottom:1px solid #21262d;">
       <button class="refresh-btn" onclick="closeBatteryPage()" title="Back" style="font-size:20px;">←</button>
-      <span style="font-weight:700; color:#f0f6fc;">🔋 Battery — last 7 days</span>
+      <span style="font-weight:700; color:#f0f6fc;">🔋 Battery — last 14 days</span>
       <span class="updated" id="batt-page-note" style="margin-left:auto;">pinch / scroll to zoom · drag to pan</span>
       <button class="range-btn" onclick="resetBattZoom()">reset</button>
     </div>
@@ -459,7 +459,7 @@
 
   <footer>
     Burns Rock Wind Station · <span id="footer-coords"></span> ·
-    <span title="Dashboard version — bumped on every edit">D1</span>
+    <span title="Dashboard version — bumped on every edit">D3</span>
   </footer>
 
 </div>
@@ -1207,7 +1207,7 @@ async function openBatteryPage() {
   if (!_battData || Date.now() - _battAt > 10 * 60e3) {
     note.textContent = 'loading 7 days…';
     try {
-      _battData = await fetchWindRange(168, 600);   // 7 days, 10-min buckets
+      _battData = await fetchWindRange(336, 600);   // 14 days, 10-min buckets
       _battAt = Date.now();
     } catch (e) {
       note.textContent = 'load failed — check connection';
@@ -1250,17 +1250,25 @@ function renderBattChart(data) {
   destroyChart('batt');
   const ctx = document.getElementById('chart-batt').getContext('2d');
   const pts = data.filter(p => p.batt && p.batt > 0);
+  // 2 h moving average (12 × 10-min buckets): the raw voltage carries ±40 mV
+  // of modem-burst sag noise — the MA is the real state-of-charge trend.
+  const vRaw = pts.map(p => p.batt);
+  const vMA  = movingAvg(vRaw, 12);
+  const pMA  = movingAvg(pts.map(p => p.pct), 12);
   charts.batt = new Chart(ctx, {
     type: 'line',
     data: {
       labels: pts.map(p => p.t),
       datasets: [
-        { label: 'Voltage (V)', data: pts.map(p => p.batt), yAxisID: 'yV',
+        { label: 'Voltage raw', data: vRaw, yAxisID: 'yV',
+          borderColor: 'rgba(63,185,80,0.25)',
+          borderWidth: 1, pointRadius: 0, tension: 0.2, fill: false },
+        { label: 'Voltage 2h avg', data: vMA, yAxisID: 'yV',
           borderColor: '#3fb950', backgroundColor: 'rgba(63,185,80,0.08)',
-          borderWidth: 1.5, pointRadius: 0, tension: 0.2, fill: false },
-        { label: 'Charge (%)', data: pts.map(p => p.pct), yAxisID: 'yP',
+          borderWidth: 2, pointRadius: 0, tension: 0.3, fill: false },
+        { label: 'Charge % 2h avg', data: pMA, yAxisID: 'yP',
           borderColor: '#58a6ff', borderDash: [5, 3],
-          borderWidth: 1.5, pointRadius: 0, tension: 0.2, fill: false },
+          borderWidth: 1.5, pointRadius: 0, tension: 0.3, fill: false },
       ]
     },
     options: {
