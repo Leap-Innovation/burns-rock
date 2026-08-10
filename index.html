@@ -226,6 +226,24 @@
       height: 180px;
     }
     .chart-wrap canvas { display: block; }
+    /* Day-swipe nav on the swell & tide charts */
+    .day-nav { display: flex; align-items: center; gap: 8px; }
+    .day-btn {
+      background: #21262d; color: #c9d1d9; border: 1px solid #30363d;
+      border-radius: 6px; width: 26px; height: 24px; line-height: 1;
+      font-size: 15px; cursor: pointer; padding: 0;
+    }
+    .day-btn:disabled { opacity: 0.3; cursor: default; }
+    .day-btn:not(:disabled):active { background: #30363d; }
+    .day-label { min-width: 70px; text-align: center; font-size: 12px; color: #8b949e; font-weight: 600; }
+    .tide-hilo {
+      display: flex; flex-wrap: wrap; gap: 6px 14px; margin-top: 8px;
+      font-size: 12px; color: #8b949e;
+    }
+    .tide-hilo .hl-item b { font-weight: 700; }
+    .tide-hilo .hl-high b { color: #3fb950; }
+    .tide-hilo .hl-low  b { color: #58a6ff; }
+    .tide-hilo .hl-none { opacity: 0.6; }
 
     /* ── Legend ─────────────────────────────────────────────────── */
     .legend {
@@ -421,7 +439,11 @@
   <div class="section">
     <div class="section-header">
       <span class="section-title">Swell</span>
-      <span class="section-badge">Today</span>
+      <div class="day-nav">
+        <button class="day-btn" id="swell-day-prev" aria-label="Previous day">‹</button>
+        <span class="day-label" id="swell-day-label">Today</span>
+        <button class="day-btn" id="swell-day-next" aria-label="Next day">›</button>
+      </div>
     </div>
     <div class="chart-wrap" id="swell-wrap"><canvas id="chart-swell"></canvas></div>
     <div class="legend">
@@ -435,9 +457,14 @@
   <div class="section">
     <div class="section-header">
       <span class="section-title">Tide</span>
-      <span class="section-badge">Today</span>
+      <div class="day-nav">
+        <button class="day-btn" id="tide-day-prev" aria-label="Previous day">‹</button>
+        <span class="day-label" id="tide-day-label">Today</span>
+        <button class="day-btn" id="tide-day-next" aria-label="Next day">›</button>
+      </div>
     </div>
     <div class="chart-wrap" id="tide-wrap"><canvas id="chart-tide"></canvas></div>
+    <div id="tide-hilo" class="tide-hilo"></div>
     <div id="tide-notice" class="api-notice" style="display:none">
       Tide data needs a free NIWA API key.<br>
       <a href="https://developer.niwa.co.nz" target="_blank">Register at developer.niwa.co.nz</a>
@@ -459,7 +486,7 @@
 
   <footer>
     Burns Rock Wind Station · <span id="footer-coords"></span> ·
-    <span title="Dashboard version — bumped on every edit">D4</span>
+    <span title="Dashboard version — bumped on every edit">D5</span>
   </footer>
 
 </div>
@@ -596,6 +623,112 @@ function timeScaleOpts(unit, fmt, pinToNow) {
 
 let charts = {};
 function destroyChart(id) { if (charts[id]) { charts[id].destroy(); delete charts[id]; } }
+
+/* ══ Day-swipe forecast nav (swell + tide, each independent) ══════
+   Both charts hold multi-day data (swell: Open-Meteo forecast days;
+   tide: NIWA numberOfDays). We cache each series and just re-window the
+   x-axis per day offset — 0 = today. Swipe left / ›  = next day,
+   right / ‹ = prev. Clamped to whatever the fetched data covers. */
+let _swell = null;   // Open-Meteo hourly object
+let _tide  = null;   // { times[], heights[] }
+let swellDay = 0;    // day offset currently shown (0 = today)
+let tideDay  = 0;
+
+function dayBounds(offset) {
+  const d0 = DateTime.now().setZone(CONFIG.TIMEZONE).startOf('day').plus({ days: offset });
+  return { min: d0.toMillis(), max: d0.plus({ days: 1 }).toMillis() };
+}
+function _clamp(v, lo, hi) { return v < lo ? lo : (v > hi ? hi : v); }
+function maxDayOffset(timeArr) {
+  if (!timeArr || !timeArr.length) return 0;
+  const t0 = DateTime.now().setZone(CONFIG.TIMEZONE).startOf('day');
+  let m = 0;
+  for (const t of timeArr) {
+    const off = Math.round(DateTime.fromISO(t, { zone: CONFIG.TIMEZONE }).startOf('day').diff(t0, 'days').days);
+    if (off > m) m = off;
+  }
+  return m;
+}
+function dayLabel(offset) {
+  if (offset === 0) return 'Today';
+  if (offset === 1) return 'Tomorrow';
+  return DateTime.now().setZone(CONFIG.TIMEZONE).plus({ days: offset }).toFormat('EEE d');
+}
+function _setDayNav(kind, offset, maxOff) {
+  const lbl  = document.getElementById(kind + '-day-label');
+  const prev = document.getElementById(kind + '-day-prev');
+  const next = document.getElementById(kind + '-day-next');
+  if (lbl)  lbl.textContent = dayLabel(offset);
+  if (prev) prev.disabled = offset <= 0;
+  if (next) next.disabled = offset >= maxOff;
+}
+
+function showSwell() {
+  if (!_swell) return;
+  const maxOff = maxDayOffset(_swell.time);
+  swellDay = _clamp(swellDay, 0, maxOff);
+  renderSwellChart(_swell.time, _swell.wave_height, _swell.wave_period, _swell.wave_direction);
+  _setDayNav('swell', swellDay, maxOff);
+}
+function showTide() {
+  if (!_tide) return;
+  const maxOff = maxDayOffset(_tide.times);
+  tideDay = _clamp(tideDay, 0, maxOff);
+  renderTideChart(_tide.times, _tide.heights, new Date().toISOString());
+  renderTideHiLo(_tide.times, _tide.heights, tideDay);
+  _setDayNav('tide', tideDay, maxOff);
+}
+
+/* High/low tide times for the day currently shown — turning points of the
+   NIWA series that fall inside that day's window. Updates as you swipe. */
+function renderTideHiLo(times, heights, offset) {
+  const el = document.getElementById('tide-hilo');
+  if (!el) return;
+  const { min, max } = dayBounds(offset);
+  const evts = [];
+  for (let i = 1; i < times.length - 1; i++) {
+    const isHigh = heights[i] >= heights[i-1] && heights[i] >= heights[i+1];
+    const isLow  = heights[i] <= heights[i-1] && heights[i] <= heights[i+1];
+    if (!isHigh && !isLow) continue;
+    const ms = tideMs(times[i]);
+    if (ms < min || ms >= max) continue;
+    evts.push({ ms, h: heights[i], hi: isHigh });
+  }
+  evts.sort((a, b) => a.ms - b.ms);
+  if (!evts.length) { el.innerHTML = '<span class="hl-none">No high/low turning points this day</span>'; return; }
+  el.innerHTML = evts.map(e => {
+    const t = DateTime.fromMillis(e.ms).setZone(CONFIG.TIMEZONE).toFormat('HH:mm');
+    return `<span class="hl-item ${e.hi ? 'hl-high' : 'hl-low'}"><b>${e.hi ? 'H' : 'L'}</b> ${t} · ${e.h.toFixed(1)} m</span>`;
+  }).join('');
+}
+
+function _swipe(el, onNext, onPrev) {
+  if (!el) return;
+  let x0 = null, y0 = null;
+  el.addEventListener('touchstart', e => { x0 = e.touches[0].clientX; y0 = e.touches[0].clientY; }, { passive: true });
+  el.addEventListener('touchend', e => {
+    if (x0 === null) return;
+    const dx = e.changedTouches[0].clientX - x0;
+    const dy = e.changedTouches[0].clientY - y0;
+    x0 = null;
+    if (Math.abs(dx) < 40 || Math.abs(dx) < Math.abs(dy)) return;   // horizontal swipes only
+    (dx < 0 ? onNext : onPrev)();
+  }, { passive: true });
+}
+
+function setupForecastNav() {
+  const sNext = () => { swellDay++; showSwell(); };
+  const sPrev = () => { swellDay--; showSwell(); };
+  const tNext = () => { tideDay++;  showTide();  };
+  const tPrev = () => { tideDay--;  showTide();  };
+  const on = (id, fn) => { const b = document.getElementById(id); if (b) b.addEventListener('click', fn); };
+  on('swell-day-next', sNext); on('swell-day-prev', sPrev);
+  on('tide-day-next',  tNext); on('tide-day-prev',  tPrev);
+  _swipe(document.getElementById('swell-wrap'), sNext, sPrev);
+  _swipe(document.getElementById('tide-wrap'),  tNext, tPrev);
+}
+if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', setupForecastNav);
+else setupForecastNav();
 
 /* ── Wind range selector ──────────────────────────────────────── */
 // Cached wind data so we can re-render without re-fetching
@@ -798,7 +931,7 @@ function renderSwellChart(times, heights, periods, directions) {
 
   // Today, local midnight → midnight — identical to the tide chart so the
   // two time axes line up exactly.
-  const xAxis = Object.assign(timeScaleOpts('hour'), todayBounds());
+  const xAxis = Object.assign(timeScaleOpts('hour'), dayBounds(swellDay));
 
   charts.swell = new Chart(ctx, {
     type: 'line',
@@ -931,7 +1064,7 @@ function renderTideChart(times, heights, nowIso) {
         annotation: undefined, // no annotation plugin loaded; we draw manually
       },
       scales: {
-        x: Object.assign(timeScaleOpts('hour', 'ha'), todayBounds()),
+        x: Object.assign(timeScaleOpts('hour', 'ha'), dayBounds(tideDay)),
         y: {
           grid: GRID,
           afterFit: a => { a.width = LEFT_AXIS_W; },
@@ -993,7 +1126,7 @@ async function fetchSwell() {
     `?latitude=${CONFIG.LAT}&longitude=${CONFIG.LNG}`,
     '&hourly=wave_height,wave_period,wave_direction,sea_surface_temperature',
     `&timezone=${encodeURIComponent(CONFIG.TIMEZONE)}`,
-    '&past_days=1&forecast_days=2',
+    '&past_days=1&forecast_days=7',
   ].join('');
   const r = await fetch(url);
   if (!r.ok) throw new Error(`Open-Meteo HTTP ${r.status}`);
@@ -1018,7 +1151,7 @@ async function fetchTides() {
   const url = [
     'https://api.niwa.co.nz/tides/data',
     `?lat=${CONFIG.LAT}&long=${CONFIG.LNG}`,
-    '&numberOfDays=3',
+    '&numberOfDays=8',
     `&startDate=${yesterday}`,
     '&datum=MSL',
     `&apikey=${CONFIG.NIWA_KEY}`,
@@ -1424,7 +1557,9 @@ async function loadAll() {
   if (swellResult.status === 'fulfilled' && swellResult.value) {
     const s = swellResult.value;
     updateSwellCard(s);
-    renderSwellChart(s.hourly.time, s.hourly.wave_height, s.hourly.wave_period, s.hourly.wave_direction);
+    _swell = s.hourly;
+    swellDay = _clamp(swellDay, 0, maxDayOffset(_swell.time));
+    showSwell();
   } else {
     errors.push('Swell data unavailable (Open-Meteo)');
     console.error('Swell fetch error:', swellResult.reason);
@@ -1436,7 +1571,9 @@ async function loadAll() {
     const times   = t.values.map(v => v.time);
     const heights = t.values.map(v => v.value);
     updateTideCard(times, heights);
-    renderTideChart(times, heights, new Date().toISOString());
+    _tide = { times, heights };
+    tideDay = _clamp(tideDay, 0, maxDayOffset(times));
+    showTide();
     document.getElementById('tide-wrap').style.display = '';
     document.getElementById('tide-notice').style.display = 'none';
   } else if (!CONFIG.NIWA_KEY) {
