@@ -246,19 +246,25 @@
       white-space: nowrap; background: rgba(13,17,23,0.72);
       padding: 1px 6px; border-radius: 5px;
     }
-    /* Landscape full-screen chart overlay (tap a graph title) */
+    /* Full-screen chart widget (tap a graph title) — shows the whole section:
+       header + controls + chart + legend, identical to the card, just large. */
     .fs-overlay { position: fixed; inset: 0; z-index: 9999; background: #0d1117; display: none; }
     .fs-overlay.open { display: block; }
     .fs-stage { position: absolute; inset: 0; }
-    .fs-rotor { position: absolute; inset: 0; }
+    .fs-rotor { position: absolute; inset: 0; display: flex; flex-direction: column; }
     .fs-stage.portrait .fs-rotor {
       inset: auto; top: 50%; left: 50%;
       width: 100vh; height: 100vw;
       transform: translate(-50%, -50%) rotate(90deg);
     }
-    .fs-overlay .chart-wrap { height: 100% !important; width: 100%; box-sizing: border-box; padding: 16px; }
+    .fs-bar { flex: 0 0 auto; display: flex; justify-content: flex-end; padding: 6px 8px; }
+    .fs-overlay .section {
+      flex: 1 1 auto; min-height: 0; margin: 0;
+      display: flex; flex-direction: column;
+      border-radius: 0; border: none;
+    }
+    .fs-overlay .chart-wrap { flex: 1 1 auto; min-height: 0; height: auto; }
     .fs-close {
-      position: absolute; top: 8px; right: 10px; z-index: 5;
       width: 34px; height: 34px; border-radius: 8px;
       background: rgba(33,38,45,0.92); color: #c9d1d9; border: 1px solid #30363d;
       font-size: 15px; line-height: 1; cursor: pointer;
@@ -511,7 +517,7 @@
 
   <footer>
     Burns Rock Wind Station · <span id="footer-coords"></span> ·
-    <span title="Dashboard version — bumped on every edit">D8</span>
+    <span title="Dashboard version — bumped on every edit">D9</span>
   </footer>
 
 </div>
@@ -757,8 +763,8 @@ function setupForecastNav() {
     t.title = 'Tap for full-screen';
     t.addEventListener('click', () => {
       const sec = t.closest('.section');
-      const wrap = sec && sec.querySelector('.chart-wrap');
-      if (wrap) openChartFullscreen(wrap);
+      if (!sec) return;
+      if (_fsReturn && _fsReturn.el === sec) closeChartFullscreen(); else openChartFullscreen(sec);
     });
   });
   document.addEventListener('fullscreenchange', () => {
@@ -766,11 +772,12 @@ function setupForecastNav() {
   });
 }
 
-/* ══ Landscape full-screen for a chart ═══════════════════════════
-   Re-parents the chart's wrapper into a fixed overlay. Android/desktop get
-   real fullscreen + a landscape orientation lock; iOS (no such APIs) falls
-   back to rotating the chart 90° via CSS so a portrait phone still shows it
-   landscape. Close via ✕, tapping the backdrop, or Escape. */
+/* ══ Full-screen chart widget ════════════════════════════════════
+   Re-parents the WHOLE section (header + buttons + chart + legend) into a
+   fixed overlay, so it looks identical to the card — just large — and every
+   control still works. Android/desktop get real fullscreen + a landscape
+   orientation lock; iOS (no such APIs) falls back to rotating 90° via CSS so
+   a portrait phone still shows it landscape. Close via ✕, the title, or Esc. */
 let _fsReturn = null;
 function ensureFsOverlay() {
   let ov = document.getElementById('fs-overlay');
@@ -778,7 +785,7 @@ function ensureFsOverlay() {
   ov = document.createElement('div');
   ov.id = 'fs-overlay';
   ov.className = 'fs-overlay';
-  ov.innerHTML = '<div class="fs-stage"><div class="fs-rotor"><button class="fs-close" aria-label="Close">✕</button></div></div>';
+  ov.innerHTML = '<div class="fs-stage"><div class="fs-rotor"><div class="fs-bar"><button class="fs-close" aria-label="Close">✕</button></div></div></div>';
   ov.addEventListener('click', e => {
     if (e.target === ov || e.target.classList.contains('fs-stage')) closeChartFullscreen();
   });
@@ -788,7 +795,7 @@ function ensureFsOverlay() {
 }
 function _fsResizeChart() {
   if (!_fsReturn) return;
-  const c = _fsReturn.wrap.querySelector('canvas');
+  const c = _fsReturn.el.querySelector('canvas');
   const ch = c && Chart.getChart(c);
   if (ch) ch.resize();
 }
@@ -798,11 +805,11 @@ function _fsOrient() {
   _fsResizeChart();
 }
 function _fsKey(e) { if (e.key === 'Escape') closeChartFullscreen(); }
-function openChartFullscreen(wrap) {
-  if (!wrap || _fsReturn) return;
+function openChartFullscreen(section) {
+  if (!section || _fsReturn) return;
   const ov = ensureFsOverlay();
-  _fsReturn = { wrap, parent: wrap.parentNode, next: wrap.nextSibling };
-  ov.querySelector('.fs-rotor').appendChild(wrap);
+  _fsReturn = { el: section, parent: section.parentNode, next: section.nextSibling };
+  ov.querySelector('.fs-rotor').appendChild(section);   // sits after the .fs-bar
   ov.classList.add('open');
   document.body.style.overflow = 'hidden';
   if (ov.requestFullscreen) ov.requestFullscreen().catch(() => {});
@@ -815,8 +822,8 @@ function openChartFullscreen(wrap) {
 function closeChartFullscreen() {
   const ov = document.getElementById('fs-overlay');
   if (!ov || !_fsReturn) return;
-  const { wrap, parent, next } = _fsReturn;
-  if (next && next.parentNode === parent) parent.insertBefore(wrap, next); else parent.appendChild(wrap);
+  const { el, parent, next } = _fsReturn;
+  if (next && next.parentNode === parent) parent.insertBefore(el, next); else parent.appendChild(el);
   _fsReturn = null;
   ov.classList.remove('open');
   document.body.style.overflow = '';
@@ -824,7 +831,7 @@ function closeChartFullscreen() {
   document.removeEventListener('keydown', _fsKey);
   try { if (document.fullscreenElement) document.exitFullscreen().catch(() => {}); } catch (e) {}
   try { if (screen.orientation && screen.orientation.unlock) screen.orientation.unlock(); } catch (e) {}
-  const c = wrap.querySelector('canvas'), ch = c && Chart.getChart(c);
+  const c = el.querySelector('canvas'), ch = c && Chart.getChart(c);
   if (ch) setTimeout(() => ch.resize(), 60);
 }
 
