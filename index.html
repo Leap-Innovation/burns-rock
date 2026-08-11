@@ -517,7 +517,7 @@
 
   <footer>
     Burns Rock Wind Station · <span id="footer-coords"></span> ·
-    <span title="Dashboard version — bumped on every edit">D9</span>
+    <span title="Dashboard version — bumped on every edit">D10</span>
   </footer>
 
 </div>
@@ -767,17 +767,17 @@ function setupForecastNav() {
       if (_fsReturn && _fsReturn.el === sec) closeChartFullscreen(); else openChartFullscreen(sec);
     });
   });
-  document.addEventListener('fullscreenchange', () => {
-    if (!document.fullscreenElement && _fsReturn) closeChartFullscreen();
-  });
+  // (No fullscreenchange handler: the overlay is pure CSS now, so nothing can
+  // yank it shut when the browser bounces out of native OS fullscreen.)
 }
 
 /* ══ Full-screen chart widget ════════════════════════════════════
    Re-parents the WHOLE section (header + buttons + chart + legend) into a
-   fixed overlay, so it looks identical to the card — just large — and every
-   control still works. Android/desktop get real fullscreen + a landscape
-   orientation lock; iOS (no such APIs) falls back to rotating 90° via CSS so
-   a portrait phone still shows it landscape. Close via ✕, the title, or Esc. */
+   fixed full-viewport overlay, so it looks identical to the card — just large —
+   and every control still works. Pure CSS overlay: NO native Fullscreen API /
+   orientation lock — those bounced in and out (with a system sound) and dragged
+   the overlay shut with them. Portrait phones rotate the overlay 90° so it still
+   reads landscape. Close via ✕, tapping the title again, or Esc. */
 let _fsReturn = null;
 function ensureFsOverlay() {
   let ov = document.getElementById('fs-overlay');
@@ -812,8 +812,6 @@ function openChartFullscreen(section) {
   ov.querySelector('.fs-rotor').appendChild(section);   // sits after the .fs-bar
   ov.classList.add('open');
   document.body.style.overflow = 'hidden';
-  if (ov.requestFullscreen) ov.requestFullscreen().catch(() => {});
-  try { if (screen.orientation && screen.orientation.lock) screen.orientation.lock('landscape').catch(() => {}); } catch (e) {}
   window.addEventListener('resize', _fsOrient);
   document.addEventListener('keydown', _fsKey);
   _fsOrient();
@@ -829,8 +827,6 @@ function closeChartFullscreen() {
   document.body.style.overflow = '';
   window.removeEventListener('resize', _fsOrient);
   document.removeEventListener('keydown', _fsKey);
-  try { if (document.fullscreenElement) document.exitFullscreen().catch(() => {}); } catch (e) {}
-  try { if (screen.orientation && screen.orientation.unlock) screen.orientation.unlock(); } catch (e) {}
   const c = el.querySelector('canvas'), ch = c && Chart.getChart(c);
   if (ch) setTimeout(() => ch.resize(), 60);
 }
