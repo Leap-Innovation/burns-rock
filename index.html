@@ -236,21 +236,32 @@
     .day-btn:disabled { opacity: 0.3; cursor: default; }
     .day-btn:not(:disabled):active { background: #30363d; }
     .day-label { min-width: 70px; text-align: center; font-size: 12px; color: #8b949e; font-weight: 600; }
-    /* Chart + right-hand readout row (keeps swell & tide plot areas aligned) */
-    .chart-row { display: flex; gap: 10px; align-items: center; }
-    .chart-row .chart-wrap { flex: 1 1 0; min-width: 0; }
-    .hilo-col { flex: 0 0 104px; }
+    /* Tide high/low times — overlaid top-right of the tide chart (takes no chart width) */
     .tide-hilo {
-      display: flex; flex-direction: column; gap: 6px; margin-top: 0;
-      font-size: 11px; color: #8b949e;
+      position: absolute; top: 8px; right: 10px; z-index: 3;
+      display: flex; flex-direction: column; align-items: flex-end; gap: 3px;
+      font-size: 11px; color: #8b949e; pointer-events: none;
     }
-    .tide-hilo .hl-item { white-space: nowrap; }
-    /* Narrow phones: drop the readout back under the chart, full width */
-    @media (max-width: 430px) {
-      .chart-row { flex-direction: column; align-items: stretch; }
-      .hilo-col { flex: 0 0 auto; }
-      .hilo-spacer { display: none; }
-      .tide-hilo { flex-direction: row; flex-wrap: wrap; gap: 6px 14px; margin-top: 8px; }
+    .tide-hilo .hl-item {
+      white-space: nowrap; background: rgba(13,17,23,0.72);
+      padding: 1px 6px; border-radius: 5px;
+    }
+    /* Landscape full-screen chart overlay (tap a graph title) */
+    .fs-overlay { position: fixed; inset: 0; z-index: 9999; background: #0d1117; display: none; }
+    .fs-overlay.open { display: block; }
+    .fs-stage { position: absolute; inset: 0; }
+    .fs-rotor { position: absolute; inset: 0; }
+    .fs-stage.portrait .fs-rotor {
+      inset: auto; top: 50%; left: 50%;
+      width: 100vh; height: 100vw;
+      transform: translate(-50%, -50%) rotate(90deg);
+    }
+    .fs-overlay .chart-wrap { height: 100% !important; width: 100%; box-sizing: border-box; padding: 16px; }
+    .fs-close {
+      position: absolute; top: 8px; right: 10px; z-index: 5;
+      width: 34px; height: 34px; border-radius: 8px;
+      background: rgba(33,38,45,0.92); color: #c9d1d9; border: 1px solid #30363d;
+      font-size: 15px; line-height: 1; cursor: pointer;
     }
     .tide-hilo .hl-item b { font-weight: 700; }
     .tide-hilo .hl-high b { color: #3fb950; }
@@ -457,10 +468,7 @@
         <button class="day-btn" id="swell-day-next" aria-label="Next day">›</button>
       </div>
     </div>
-    <div class="chart-row">
-      <div class="chart-wrap" id="swell-wrap"><canvas id="chart-swell"></canvas></div>
-      <div class="hilo-col hilo-spacer" aria-hidden="true"></div>
-    </div>
+    <div class="chart-wrap" id="swell-wrap"><canvas id="chart-swell"></canvas></div>
     <div class="legend">
       <div class="legend-item"><div class="legend-dot" style="background:#3fb950"></div> Height (m)</div>
       <div class="legend-item"><div class="legend-dot" style="background:#58a6ff"></div> Period (s)</div>
@@ -478,9 +486,9 @@
         <button class="day-btn" id="tide-day-next" aria-label="Next day">›</button>
       </div>
     </div>
-    <div class="chart-row">
-      <div class="chart-wrap" id="tide-wrap"><canvas id="chart-tide"></canvas></div>
-      <div id="tide-hilo" class="tide-hilo hilo-col"></div>
+    <div class="chart-wrap" id="tide-wrap">
+      <canvas id="chart-tide"></canvas>
+      <div id="tide-hilo" class="tide-hilo"></div>
     </div>
     <div id="tide-notice" class="api-notice" style="display:none">
       Tide data needs a free NIWA API key.<br>
@@ -503,7 +511,7 @@
 
   <footer>
     Burns Rock Wind Station · <span id="footer-coords"></span> ·
-    <span title="Dashboard version — bumped on every edit">D6</span>
+    <span title="Dashboard version — bumped on every edit">D7</span>
   </footer>
 
 </div>
@@ -715,7 +723,7 @@ function renderTideHiLo(times, heights, offset) {
   if (!evts.length) { el.innerHTML = '<span class="hl-none">No high/low turning points this day</span>'; return; }
   el.innerHTML = evts.map(e => {
     const t = DateTime.fromMillis(e.ms).setZone(CONFIG.TIMEZONE).toFormat('HH:mm');
-    return `<span class="hl-item ${e.hi ? 'hl-high' : 'hl-low'}"><b>${e.hi ? 'H' : 'L'}</b> ${t} · ${e.h.toFixed(1)} m</span>`;
+    return `<span class="hl-item ${e.hi ? 'hl-high' : 'hl-low'}"><b>${e.hi ? 'H' : 'L'}</b> ${t}</span>`;
   }).join('');
 }
 
@@ -743,7 +751,83 @@ function setupForecastNav() {
   on('tide-day-next',  tNext); on('tide-day-prev',  tPrev);
   _swipe(document.getElementById('swell-wrap'), sNext, sPrev);
   _swipe(document.getElementById('tide-wrap'),  tNext, tPrev);
+  // Tap a graph title → landscape full-screen (Wind / Swell / Tide)
+  document.querySelectorAll('.section-title').forEach(t => {
+    t.style.cursor = 'pointer';
+    t.title = 'Tap for full-screen';
+    t.addEventListener('click', () => {
+      const sec = t.closest('.section');
+      const wrap = sec && sec.querySelector('.chart-wrap');
+      if (wrap) openChartFullscreen(wrap);
+    });
+  });
+  document.addEventListener('fullscreenchange', () => {
+    if (!document.fullscreenElement && _fsReturn) closeChartFullscreen();
+  });
 }
+
+/* ══ Landscape full-screen for a chart ═══════════════════════════
+   Re-parents the chart's wrapper into a fixed overlay. Android/desktop get
+   real fullscreen + a landscape orientation lock; iOS (no such APIs) falls
+   back to rotating the chart 90° via CSS so a portrait phone still shows it
+   landscape. Close via ✕, tapping the backdrop, or Escape. */
+let _fsReturn = null;
+function ensureFsOverlay() {
+  let ov = document.getElementById('fs-overlay');
+  if (ov) return ov;
+  ov = document.createElement('div');
+  ov.id = 'fs-overlay';
+  ov.className = 'fs-overlay';
+  ov.innerHTML = '<div class="fs-stage"><div class="fs-rotor"><button class="fs-close" aria-label="Close">✕</button></div></div>';
+  ov.addEventListener('click', e => {
+    if (e.target === ov || e.target.classList.contains('fs-stage')) closeChartFullscreen();
+  });
+  ov.querySelector('.fs-close').addEventListener('click', closeChartFullscreen);
+  document.body.appendChild(ov);
+  return ov;
+}
+function _fsResizeChart() {
+  if (!_fsReturn) return;
+  const c = _fsReturn.wrap.querySelector('canvas');
+  const ch = c && Chart.getChart(c);
+  if (ch) ch.resize();
+}
+function _fsOrient() {
+  const ov = document.getElementById('fs-overlay'); if (!ov) return;
+  ov.querySelector('.fs-stage').classList.toggle('portrait', window.innerHeight > window.innerWidth);
+  _fsResizeChart();
+}
+function _fsKey(e) { if (e.key === 'Escape') closeChartFullscreen(); }
+function openChartFullscreen(wrap) {
+  if (!wrap || _fsReturn) return;
+  const ov = ensureFsOverlay();
+  _fsReturn = { wrap, parent: wrap.parentNode, next: wrap.nextSibling };
+  ov.querySelector('.fs-rotor').appendChild(wrap);
+  ov.classList.add('open');
+  document.body.style.overflow = 'hidden';
+  if (ov.requestFullscreen) ov.requestFullscreen().catch(() => {});
+  try { if (screen.orientation && screen.orientation.lock) screen.orientation.lock('landscape').catch(() => {}); } catch (e) {}
+  window.addEventListener('resize', _fsOrient);
+  document.addEventListener('keydown', _fsKey);
+  _fsOrient();
+  setTimeout(_fsResizeChart, 60);
+}
+function closeChartFullscreen() {
+  const ov = document.getElementById('fs-overlay');
+  if (!ov || !_fsReturn) return;
+  const { wrap, parent, next } = _fsReturn;
+  if (next && next.parentNode === parent) parent.insertBefore(wrap, next); else parent.appendChild(wrap);
+  _fsReturn = null;
+  ov.classList.remove('open');
+  document.body.style.overflow = '';
+  window.removeEventListener('resize', _fsOrient);
+  document.removeEventListener('keydown', _fsKey);
+  try { if (document.fullscreenElement) document.exitFullscreen().catch(() => {}); } catch (e) {}
+  try { if (screen.orientation && screen.orientation.unlock) screen.orientation.unlock(); } catch (e) {}
+  const c = wrap.querySelector('canvas'), ch = c && Chart.getChart(c);
+  if (ch) setTimeout(() => ch.resize(), 60);
+}
+
 if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', setupForecastNav);
 else setupForecastNav();
 
