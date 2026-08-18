@@ -467,7 +467,7 @@
     <div class="chart-wrap"><canvas id="chart-wind"></canvas></div>
     <div class="legend">
       <div class="legend-item"><div class="legend-dot" style="background:#a371f7"></div> Direction</div>
-      <div class="legend-item"><div class="legend-dot" style="background:#58a6ff"></div> 10m MA</div>
+      <div class="legend-item"><div class="legend-dot" style="background:linear-gradient(90deg,#58a6ff,#3fb950,#f0883e,#f85149)"></div> 10m MA · colour = speed</div>
       <div class="legend-item"><div class="legend-dash" style="background:#f0883e"></div> Gust</div>
     </div>
   </div>
@@ -527,7 +527,7 @@
 
   <footer>
     Burns Rock Wind Station · <span id="footer-coords"></span> ·
-    <span title="Dashboard version — bumped on every edit">D12</span>
+    <span title="Dashboard version — bumped on every edit">D13</span>
   </footer>
 
 </div>
@@ -889,6 +889,17 @@ function movingAvg(values, window) {
 }
 const MA_WINDOW = 10; // 10-minute moving average (assumes 1 reading/min)
 
+// Wind-speed → colour (knots). Rough Beaufort-style bands: light (blue) →
+// moderate (green) → strong (orange) → gale (red). Used to colour the speed line
+// segment-by-segment so it changes hue as the wind builds and eases.
+function windSpeedColour(kt) {
+  if (kt == null || !isFinite(kt)) return '#58a6ff';
+  if (kt < 6)  return '#58a6ff';   // light      (< 6 kt)   blue
+  if (kt < 12) return '#3fb950';   // moderate   (6–12 kt)  green
+  if (kt < 22) return '#f0883e';   // strong     (12–22 kt) orange
+  return '#f85149';                // gale       (≥ 22 kt)  red
+}
+
 /* ── Wind chart (speed + direction combined) ──────────────────── */
 function renderWindChart(data) {
   _lastWindData = data;   // cache for range re-renders
@@ -902,6 +913,10 @@ function renderWindChart(data) {
   const ma      = movingAvg(raw, MA_WINDOW);
   const rawGust = data.map(d => toDisplaySpeed(d.wmax));
   const gust    = movingAvg(rawGust, MA_WINDOW);
+
+  // Colour the 10m speed line by its value, in KNOTS (unit-independent) so the
+  // trace shifts hue as the wind rises and falls, alongside the side scale.
+  const maKt = movingAvg(data.map(d => d.ws), MA_WINDOW);
 
   // Direction dataset (left axis yD) — insert null gaps on >180° wraps
   const active = data.filter(d => d.wmax > 0);
@@ -967,12 +982,16 @@ function renderWindChart(data) {
           fill: false,
           order: 2,
         },
-        // 10m MA — right axis
+        // 10m MA — right axis. Line colour tracks wind speed (see windSpeedColour);
+        // each segment is coloured by the speed at its end point.
         {
           label: '10m MA',
           data: ma,
           yAxisID: 'yS',
-          borderColor: '#58a6ff',
+          borderColor: '#58a6ff',   // fallback (legend swatch)
+          segment: {
+            borderColor: ctx => windSpeedColour(maKt[ctx.p1DataIndex]),
+          },
           backgroundColor: 'rgba(88,166,255,0.12)',
           borderWidth: 2,
           pointRadius: 0,
@@ -1201,6 +1220,8 @@ const COARSE_TTL_MS  = 10 * 60e3; // re-fetch coarse layer after this
 
 let _windCache = [];             // merged points, ascending by time
 let _coarseAt  = 0;              // when the coarse layer was last fetched
+let _stationChem = '';          // active unit's battery chemistry from the backend
+                                // ('liion' | 'lfp' | ''), sets the badge colour bands
 
 async function fetchWindRange(hours, stepS) {
   const url = `${CONFIG.GAS_URL}?cmd=get_data&hours=${hours}` +
@@ -1210,6 +1231,9 @@ async function fetchWindRange(hours, stepS) {
   if (!r.ok) throw new Error(`GAS HTTP ${r.status}`);
   const j = await r.json();
   if (!j.ok) throw new Error(j.error || 'GAS error');
+  // Backend reports the station's battery chemistry (from Fleet Settings) so the
+  // battery badge can colour on chemistry-correct voltage bands.
+  if (j.chem !== undefined) _stationChem = j.chem;
   // Sort ascending so [length-1] is ALWAYS the newest (2026-07 lesson).
   return (j.data || []).sort((a, b) => new Date(a.t) - new Date(b.t));
 }
@@ -1579,10 +1603,24 @@ function updateBatteryBadge(latest) {
   document.getElementById('batt-volt').textContent = v.toFixed(2) + 'V';
   document.getElementById('batt-pct').textContent  =
     (pct && pct > 0) ? '·' + Math.round(pct) + '%' : '';
-  badge.className = 'batt-badge ' +
-    (v >= 3.70 ? 'batt-ok' : v >= 3.50 ? 'batt-low' : 'batt-crit');
-  badge.title = 'Station battery (latest report)' +
-    (v < 3.50 ? ' — nearing survival cutoff (3.30 V)' : '');
+
+  // Chemistry-correct voltage bands (chemistry comes from Fleet Settings via the
+  // backend). LiFePO4 sits at ~3.2–3.45 V healthy; Li-ion at ~3.7–4.2 V. Using one
+  // scale for both mis-colours whichever chemistry it wasn't tuned for. Unknown
+  // chemistry falls back to the Li-ion bands (the historical default).
+  let cls, cut;
+  if (_stationChem === 'lfp') {
+    cls = v >= 3.30 ? 'batt-ok' : v >= 3.15 ? 'batt-low' : 'batt-crit';
+    cut = 'survival cutoff (3.05 V)';
+  } else {
+    cls = v >= 3.70 ? 'batt-ok' : v >= 3.50 ? 'batt-low' : 'batt-crit';
+    cut = 'survival cutoff (3.30 V)';
+  }
+  badge.className = 'batt-badge ' + cls;
+  const chemLabel = _stationChem === 'lfp' ? 'LiFePO4'
+                  : _stationChem === 'liion' ? 'Li-ion' : 'chemistry unknown';
+  badge.title = `Station battery · ${chemLabel} (latest report)` +
+    (cls === 'batt-crit' ? ` — nearing ${cut}` : '');
 }
 
 function updateSwellCard(swell) {
@@ -1682,24 +1720,29 @@ async function loadAll() {
     console.error('Wind fetch error:', windResult.reason || 'no data');
   }
 
-  /* Swell (location-only) */
-  if (loc) {
-    if (swellResult.status === 'fulfilled' && swellResult.value) {
+  /* Swell — shown only when the unit has a location AND real swell data came
+     back. No data (fetch failed / empty) → the whole widget is hidden, no toast. */
+  {
+    const ok = loc && swellResult.status === 'fulfilled' && swellResult.value
+               && swellResult.value.hourly && swellResult.value.hourly.wave_height
+               && swellResult.value.hourly.wave_height.some(v => v != null);
+    if (ok) {
       const s = swellResult.value;
       updateSwellCard(s);
       _swell = s.hourly;
       swellDay = _clamp(swellDay, 0, maxDayOffset(_swell.time));
       showSwell();
-    } else {
-      errors.push('Swell data unavailable (Open-Meteo)');
-      console.error('Swell fetch error:', swellResult.reason);
     }
+    setWidget('swell', ok);
+    if (loc && !ok) console.error('Swell fetch error:', swellResult.reason || 'no data');
   }
 
-  /* Tide (location-only) */
-  if (loc) {
-    if (tideResult.status === 'fulfilled' && tideResult.value) {
-      const t = tideResult.value;
+  /* Tide — shown only when the unit has a location AND real tide data came back.
+     No NIWA key, fetch failure, or empty series → the whole widget is hidden. */
+  {
+    const t  = (tideResult.status === 'fulfilled') ? tideResult.value : null;
+    const ok = loc && t && Array.isArray(t.values) && t.values.length > 0;
+    if (ok) {
       const times   = t.values.map(v => v.time);
       const heights = t.values.map(v => v.value);
       updateTideCard(times, heights);
@@ -1708,13 +1751,9 @@ async function loadAll() {
       showTide();
       document.getElementById('tide-wrap').style.display = '';
       document.getElementById('tide-notice').style.display = 'none';
-    } else if (!CONFIG.NIWA_KEY) {
-      document.getElementById('tide-wrap').style.display = 'none';
-      document.getElementById('tide-notice').style.display = 'block';
-    } else {
-      errors.push('Tide data unavailable (NIWA API)');
-      console.error('Tide fetch error:', tideResult.reason);
     }
+    setWidget('tide', ok);
+    if (loc && !ok) console.error('Tide fetch error:', tideResult.reason || 'no data / no NIWA key');
   }
 
   /* Timestamp + status */
@@ -1742,6 +1781,14 @@ if (CONFIG.REFRESH_MIN > 0) {
 function unitHasLocation() {
   return Number.isFinite(CONFIG.LAT) && Number.isFinite(CONFIG.LNG)
       && !(CONFIG.LAT === 0 && CONFIG.LNG === 0);
+}
+
+// Show/hide a summary-card + chart-section pair by name (swell / tide).
+function setWidget(name, show) {
+  const card = document.getElementById(name + '-card');
+  const sec  = document.getElementById(name + '-section');
+  if (card) card.style.display = show ? '' : 'none';
+  if (sec)  sec.style.display  = show ? '' : 'none';
 }
 
 // Show/hide the per-unit chrome (camera panel + location-only widgets) to match
