@@ -226,6 +226,12 @@
       height: 180px;
     }
     .chart-wrap canvas { display: block; }
+    /* Unit selector in the header — styled to sit in the title */
+    #unit-select {
+      background: transparent; border: none; color: inherit;
+      font: inherit; font-weight: inherit; cursor: pointer; padding: 2px 4px;
+    }
+    #unit-select option { color: #0d1117; }   /* readable on the native (light) menu */
     /* Day-swipe nav on the swell & tide charts */
     .day-nav { display: flex; align-items: center; gap: 8px; }
     .day-btn {
@@ -348,7 +354,9 @@
 
   <!-- Header -->
   <header>
-    <div class="site-name">🌊 <span>Burns</span> Rock</div>
+    <div class="site-name" style="display:flex; align-items:center; gap:4px;">🌊
+      <select id="unit-select" title="Select unit"></select>
+    </div>
     <div style="display:flex; align-items:center; gap:8px;">
       <div class="updated" id="updated-time">Loading…</div>
       <button class="refresh-btn" id="refresh-btn" title="Refresh" onclick="loadAll()">↻</button>
@@ -517,7 +525,7 @@
 
   <footer>
     Burns Rock Wind Station · <span id="footer-coords"></span> ·
-    <span title="Dashboard version — bumped on every edit">D10</span>
+    <span title="Dashboard version — bumped on every edit">D11</span>
   </footer>
 
 </div>
@@ -1194,7 +1202,8 @@ let _coarseAt  = 0;              // when the coarse layer was last fetched
 
 async function fetchWindRange(hours, stepS) {
   const url = `${CONFIG.GAS_URL}?cmd=get_data&hours=${hours}` +
-              (stepS ? `&step=${stepS}` : '');
+              (stepS ? `&step=${stepS}` : '') +
+              (CONFIG.STATION ? `&station=${encodeURIComponent(CONFIG.STATION)}` : '');
   const r = await fetch(url);
   if (!r.ok) throw new Error(`GAS HTTP ${r.status}`);
   const j = await r.json();
@@ -1463,7 +1472,8 @@ function resetBattZoom() { if (charts.batt) charts.batt.resetZoom(); }
 async function updateBootInfo() {
   const el = document.getElementById('boot-info');
   try {
-    const r = await fetch(`${CONFIG.GAS_URL}?cmd=get_boot&limit=2`);
+    const r = await fetch(`${CONFIG.GAS_URL}?cmd=get_boot&limit=2` +
+                          (CONFIG.STATION ? `&station=${encodeURIComponent(CONFIG.STATION)}` : ''));
     const j = await r.json();
     if (!j.ok || !j.boots || !j.boots.length) { el.textContent = 'no boot events recorded'; return; }
     const b = j.boots[0];
@@ -1704,7 +1714,34 @@ if (CONFIG.REFRESH_MIN > 0) {
   setInterval(loadAll, CONFIG.REFRESH_MIN * 60 * 1000);
 }
 
+/* ── Multi-unit selector ──────────────────────────────────────────
+   The whole dashboard (and the battery page) shows one unit at a time.
+   Selecting a unit sets CONFIG.STATION (→ &station= on the data fetch) and
+   swaps LAT/LNG/SITE_NAME so the per-site tide/swell/sun recompute. */
+function setActiveUnit(id, reload) {
+  const units = CONFIG.UNITS || [];
+  const u = units.find(x => x.id === id) || units[0];
+  if (u) { CONFIG.STATION = u.id; CONFIG.LAT = u.lat; CONFIG.LNG = u.lng; CONFIG.SITE_NAME = u.name; }
+  try { localStorage.setItem('unit', CONFIG.STATION || ''); } catch (e) {}
+  const sel = document.getElementById('unit-select');
+  if (sel && CONFIG.STATION) sel.value = CONFIG.STATION;
+  if (reload) loadAll();
+}
+function setupUnits() {
+  const units = CONFIG.UNITS || [];
+  const sel = document.getElementById('unit-select');
+  if (sel) {
+    sel.innerHTML = units.map(u => `<option value="${u.id}">${u.name}</option>`).join('');
+    sel.addEventListener('change', () => setActiveUnit(sel.value, true));
+  }
+  let start = null;
+  try { start = localStorage.getItem('unit'); } catch (e) {}
+  if (!start || !units.some(u => u.id === start)) start = units.length ? units[0].id : (CONFIG.STATION || '');
+  setActiveUnit(start, false);   // seed config + dropdown; the initial loadAll() runs next
+}
+
 /* ── Boot ─────────────────────────────────────────────────────── */
+setupUnits();
 loadAll();
 </script>
 </body>
