@@ -10,6 +10,15 @@ const CONFIG = {
   SITE_NAME:   'Burns Rock',
   LAT:         -36.7732,
   LNG:         175.0274,
-  NIWA_KEY:    'vCGlyB8VgvPfxiWIyRPCXnQxuWEcielw',                 // optional — get free key at developer.niwa.co.nz
+  // ── Fleet: one line per deployed unit. The header dropdown selects which unit the
+  //    whole dashboard (and the battery page) shows. `id` MUST match the station id the
+  //    unit reports (e.g. st-e3820c); lat/lng drive that site's tide/swell/sun. The
+  //    SITE_NAME/LAT/LNG above are just the initial fallback — the selected unit wins.
+  UNITS: [
+    { id: 'st-e3820c', name: 'Burns Rock', lat: -36.7732, lng: 175.0274 },
+    // { id: 'st-53a074', name: 'Site Two',   lat: -00.0000, lng: 000.0000 },
+  ],
+  STATION:     'st-e3820c',        // active unit (overridden by the dropdown / saved choice)
+  NIWA_KEY:    '',                 // optional — get free key at developer.niwa.co.nz
   REFRESH_MIN: 1,                  // auto-refresh interval in minutes
 };
