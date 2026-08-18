@@ -434,7 +434,7 @@
       <div class="card-sub" id="wind-dir-text">–</div>
     </div>
     <!-- Swell -->
-    <div class="card swell-card">
+    <div class="card swell-card" id="swell-card">
       <div class="card-label">Swell</div>
       <div style="font-size:22px; margin-bottom:4px;">🌊</div>
       <div class="card-value" id="swell-height">–</div>
@@ -443,7 +443,7 @@
       <div class="card-sub" id="swell-dir">–</div>
     </div>
     <!-- Tide -->
-    <div class="card tide-card">
+    <div class="card tide-card" id="tide-card">
       <div class="card-label">Tide</div>
       <div style="font-size:22px; margin-bottom:4px;" id="tide-arrow-icon">🌊</div>
       <div class="card-value" id="tide-height">–</div>
@@ -473,7 +473,7 @@
   </div>
 
   <!-- Swell Chart -->
-  <div class="section">
+  <div class="section" id="swell-section">
     <div class="section-header">
       <span class="section-title">Swell</span>
       <div class="day-nav">
@@ -491,7 +491,7 @@
   </div>
 
   <!-- Tide Chart -->
-  <div class="section">
+  <div class="section" id="tide-section">
     <div class="section-header">
       <span class="section-title">Tide</span>
       <div class="day-nav">
@@ -511,11 +511,13 @@
     </div>
   </div>
 
-  <div class="cam-section">
+  <!-- Camera: src + visibility are set per unit by setActiveUnit(); hidden when the
+       selected unit has no `webcam` URL in CONFIG. -->
+  <div class="cam-section" id="cam-section" style="display:none">
     <div class="cam-label">📷 Live Camera</div>
     <div class="cam-wrap">
-      <iframe
-        src="https://customer-i5pk1zypbotc8vgf.cloudflarestream.com/86a9a0d45a6635fdcc23aa9e3005c3dc/iframe?dvrEnabled=true"
+      <iframe id="cam-iframe"
+        src="about:blank"
         allow="accelerometer; gyroscope; autoplay; encrypted-media; picture-in-picture; fullscreen"
         allowfullscreen
         style="border:none; width:100%; height:100%;"
@@ -525,7 +527,7 @@
 
   <footer>
     Burns Rock Wind Station · <span id="footer-coords"></span> ·
-    <span title="Dashboard version — bumped on every edit">D11</span>
+    <span title="Dashboard version — bumped on every edit">D12</span>
   </footer>
 
 </div>
@@ -1633,25 +1635,38 @@ async function loadAll() {
   const btn = document.getElementById('refresh-btn');
   btn.classList.add('spinning');
   clearStatus();
-  updateSunBadge();   // pure local math — refreshes across midnight automatically
+
+  // Location-only header/footer chrome. Units with no fixed position skip the
+  // sun/coords entirely (and the tide/swell/sun/air fetches below).
+  const loc = unitHasLocation();
+  const sunBadge = document.getElementById('sun-badge');
+  if (loc) {
+    updateSunBadge();   // pure local math — refreshes across midnight automatically
+    if (sunBadge) sunBadge.style.display = '';
+  } else if (sunBadge) {
+    sunBadge.style.display = 'none';
+  }
 
   const now = DateTime.now().setZone(CONFIG.TIMEZONE);
   document.getElementById('updated-time').textContent = 'Loading…';
   document.getElementById('footer-coords').textContent =
-    `${Math.abs(CONFIG.LAT).toFixed(4)}°S ${CONFIG.LNG.toFixed(4)}°E`;
+    loc ? `${Math.abs(CONFIG.LAT).toFixed(4)}°S ${CONFIG.LNG.toFixed(4)}°E`
+        : (CONFIG.SITE_NAME || '');
 
-  // Fetch all sources in parallel; handle each independently
+  // Fetch all sources in parallel; handle each independently. Location-dependent
+  // sources are skipped (resolve null) when the unit has no position.
   const [windResult, swellResult, tideResult, airResult] = await Promise.allSettled([
     loadWind(),
-    fetchSwell(),
-    fetchTides(),
-    fetchAirTemp(),
+    loc ? fetchSwell()   : Promise.resolve(null),
+    loc ? fetchTides()   : Promise.resolve(null),
+    loc ? fetchAirTemp() : Promise.resolve(null),
   ]);
 
   /* Air temperature (header temp badge) — model value, indicative */
   document.getElementById('air-temp-v').textContent =
-    (airResult.status === 'fulfilled' && airResult.value != null)
+    (loc && airResult.status === 'fulfilled' && airResult.value != null)
       ? `${airResult.value.toFixed(1)}°` : '–';
+  if (!loc) document.getElementById('sea-temp-v').textContent = '–';   // sea temp comes from swell (skipped)
 
   const errors = [];
 
@@ -1667,35 +1682,39 @@ async function loadAll() {
     console.error('Wind fetch error:', windResult.reason || 'no data');
   }
 
-  /* Swell */
-  if (swellResult.status === 'fulfilled' && swellResult.value) {
-    const s = swellResult.value;
-    updateSwellCard(s);
-    _swell = s.hourly;
-    swellDay = _clamp(swellDay, 0, maxDayOffset(_swell.time));
-    showSwell();
-  } else {
-    errors.push('Swell data unavailable (Open-Meteo)');
-    console.error('Swell fetch error:', swellResult.reason);
+  /* Swell (location-only) */
+  if (loc) {
+    if (swellResult.status === 'fulfilled' && swellResult.value) {
+      const s = swellResult.value;
+      updateSwellCard(s);
+      _swell = s.hourly;
+      swellDay = _clamp(swellDay, 0, maxDayOffset(_swell.time));
+      showSwell();
+    } else {
+      errors.push('Swell data unavailable (Open-Meteo)');
+      console.error('Swell fetch error:', swellResult.reason);
+    }
   }
 
-  /* Tide */
-  if (tideResult.status === 'fulfilled' && tideResult.value) {
-    const t = tideResult.value;
-    const times   = t.values.map(v => v.time);
-    const heights = t.values.map(v => v.value);
-    updateTideCard(times, heights);
-    _tide = { times, heights };
-    tideDay = _clamp(tideDay, 0, maxDayOffset(times));
-    showTide();
-    document.getElementById('tide-wrap').style.display = '';
-    document.getElementById('tide-notice').style.display = 'none';
-  } else if (!CONFIG.NIWA_KEY) {
-    document.getElementById('tide-wrap').style.display = 'none';
-    document.getElementById('tide-notice').style.display = 'block';
-  } else {
-    errors.push('Tide data unavailable (NIWA API)');
-    console.error('Tide fetch error:', tideResult.reason);
+  /* Tide (location-only) */
+  if (loc) {
+    if (tideResult.status === 'fulfilled' && tideResult.value) {
+      const t = tideResult.value;
+      const times   = t.values.map(v => v.time);
+      const heights = t.values.map(v => v.value);
+      updateTideCard(times, heights);
+      _tide = { times, heights };
+      tideDay = _clamp(tideDay, 0, maxDayOffset(times));
+      showTide();
+      document.getElementById('tide-wrap').style.display = '';
+      document.getElementById('tide-notice').style.display = 'none';
+    } else if (!CONFIG.NIWA_KEY) {
+      document.getElementById('tide-wrap').style.display = 'none';
+      document.getElementById('tide-notice').style.display = 'block';
+    } else {
+      errors.push('Tide data unavailable (NIWA API)');
+      console.error('Tide fetch error:', tideResult.reason);
+    }
   }
 
   /* Timestamp + status */
@@ -1718,13 +1737,50 @@ if (CONFIG.REFRESH_MIN > 0) {
    The whole dashboard (and the battery page) shows one unit at a time.
    Selecting a unit sets CONFIG.STATION (→ &station= on the data fetch) and
    swaps LAT/LNG/SITE_NAME so the per-site tide/swell/sun recompute. */
+// True when the active unit has a real fixed position. Missing coords or the
+// 0,0 placeholder count as "no location" → tide / swell / sun are hidden.
+function unitHasLocation() {
+  return Number.isFinite(CONFIG.LAT) && Number.isFinite(CONFIG.LNG)
+      && !(CONFIG.LAT === 0 && CONFIG.LNG === 0);
+}
+
+// Show/hide the per-unit chrome (camera panel + location-only widgets) to match
+// the active unit. Called on every unit switch, before the data reload.
+function applyUnitChrome() {
+  // Camera: only if this unit has a stream URL.
+  const camSec = document.getElementById('cam-section');
+  const camIf  = document.getElementById('cam-iframe');
+  if (camSec && camIf) {
+    if (CONFIG.WEBCAM) {
+      if (camIf.getAttribute('src') !== CONFIG.WEBCAM) camIf.src = CONFIG.WEBCAM;
+      camSec.style.display = '';
+    } else {
+      camIf.src = 'about:blank';   // stop any previous unit's stream
+      camSec.style.display = 'none';
+    }
+  }
+  // Location-dependent widgets (summary cards + charts) hidden with no location.
+  const disp = unitHasLocation() ? '' : 'none';
+  ['swell-card', 'tide-card', 'swell-section', 'tide-section'].forEach(id => {
+    const el = document.getElementById(id);
+    if (el) el.style.display = disp;
+  });
+}
+
 function setActiveUnit(id, reload) {
   const units = CONFIG.UNITS || [];
   const u = units.find(x => x.id === id) || units[0];
-  if (u) { CONFIG.STATION = u.id; CONFIG.LAT = u.lat; CONFIG.LNG = u.lng; CONFIG.SITE_NAME = u.name; }
+  if (u) {
+    CONFIG.STATION   = u.id;
+    CONFIG.LAT       = (u.lat !== undefined && u.lat !== null) ? u.lat : NaN;
+    CONFIG.LNG       = (u.lng !== undefined && u.lng !== null) ? u.lng : NaN;
+    CONFIG.SITE_NAME = u.name;
+    CONFIG.WEBCAM    = u.webcam || '';
+  }
   try { localStorage.setItem('unit', CONFIG.STATION || ''); } catch (e) {}
   const sel = document.getElementById('unit-select');
   if (sel && CONFIG.STATION) sel.value = CONFIG.STATION;
+  applyUnitChrome();
   if (reload) loadAll();
 }
 function setupUnits() {
@@ -1734,8 +1790,15 @@ function setupUnits() {
     sel.innerHTML = units.map(u => `<option value="${u.id}">${u.name}</option>`).join('');
     sel.addEventListener('change', () => setActiveUnit(sel.value, true));
   }
+  // Unit precedence: ?unit=<id> in the URL wins, then the saved choice, then the
+  // first unit. The URL override lets you open two windows pinned to two units
+  // (e.g. ...index.html?unit=st-e3820c and ...?unit=st-e16b78) — without it, both
+  // tabs share one localStorage 'unit' and converge to the same station on reload.
   let start = null;
-  try { start = localStorage.getItem('unit'); } catch (e) {}
+  try { start = new URLSearchParams(location.search).get('unit'); } catch (e) {}
+  if (!start || !units.some(u => u.id === start)) {
+    try { start = localStorage.getItem('unit'); } catch (e) {}
+  }
   if (!start || !units.some(u => u.id === start)) start = units.length ? units[0].id : (CONFIG.STATION || '');
   setActiveUnit(start, false);   // seed config + dropdown; the initial loadAll() runs next
 }
