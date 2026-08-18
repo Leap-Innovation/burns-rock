@@ -20,7 +20,7 @@ const CONFIG = {
     { id: 'st-53a074', name: 'Bench tester',   lat: -00.0000, lng: 000.0000 },
   ],
   STATION:     'st-e3820c',        // active unit (overridden by the dropdown / saved choice)
-  NIWA_KEY:    '',                 // optional — get free key at developer.niwa.co.nz
+  NIWA_KEY:    'bDntgt2IkfNxZwqOv0pk9Tp01Xs0wC0D',                 // optional — get free key at developer.niwa.co.nz
   REFRESH_MIN: 1,                  // auto-refresh interval in minutes
 };
 
