@@ -467,7 +467,7 @@
     <div class="chart-wrap"><canvas id="chart-wind"></canvas></div>
     <div class="legend">
       <div class="legend-item"><div class="legend-dot" style="background:#a371f7"></div> Direction</div>
-      <div class="legend-item"><div class="legend-dot" style="background:linear-gradient(90deg,#58a6ff,#3fb950,#f0883e,#f85149)"></div> 10m MA · colour = speed</div>
+      <div class="legend-item"><div class="legend-dot" style="background:#58a6ff"></div> 10m MA</div>
       <div class="legend-item"><div class="legend-dash" style="background:#f0883e"></div> Gust</div>
     </div>
   </div>
@@ -889,17 +889,6 @@ function movingAvg(values, window) {
 }
 const MA_WINDOW = 10; // 10-minute moving average (assumes 1 reading/min)
 
-// Wind-speed → colour (knots). Rough Beaufort-style bands: light (blue) →
-// moderate (green) → strong (orange) → gale (red). Used to colour the speed line
-// segment-by-segment so it changes hue as the wind builds and eases.
-function windSpeedColour(kt) {
-  if (kt == null || !isFinite(kt)) return '#58a6ff';
-  if (kt < 6)  return '#58a6ff';   // light      (< 6 kt)   blue
-  if (kt < 12) return '#3fb950';   // moderate   (6–12 kt)  green
-  if (kt < 22) return '#f0883e';   // strong     (12–22 kt) orange
-  return '#f85149';                // gale       (≥ 22 kt)  red
-}
-
 /* ── Wind chart (speed + direction combined) ──────────────────── */
 function renderWindChart(data) {
   _lastWindData = data;   // cache for range re-renders
@@ -913,10 +902,6 @@ function renderWindChart(data) {
   const ma      = movingAvg(raw, MA_WINDOW);
   const rawGust = data.map(d => toDisplaySpeed(d.wmax));
   const gust    = movingAvg(rawGust, MA_WINDOW);
-
-  // Colour the 10m speed line by its value, in KNOTS (unit-independent) so the
-  // trace shifts hue as the wind rises and falls, alongside the side scale.
-  const maKt = movingAvg(data.map(d => d.ws), MA_WINDOW);
 
   // Direction dataset (left axis yD) — insert null gaps on >180° wraps
   const active = data.filter(d => d.wmax > 0);
@@ -982,16 +967,12 @@ function renderWindChart(data) {
           fill: false,
           order: 2,
         },
-        // 10m MA — right axis. Line colour tracks wind speed (see windSpeedColour);
-        // each segment is coloured by the speed at its end point.
+        // 10m MA — right axis
         {
           label: '10m MA',
           data: ma,
           yAxisID: 'yS',
-          borderColor: '#58a6ff',   // fallback (legend swatch)
-          segment: {
-            borderColor: ctx => windSpeedColour(maKt[ctx.p1DataIndex]),
-          },
+          borderColor: '#58a6ff',
           backgroundColor: 'rgba(88,166,255,0.12)',
           borderWidth: 2,
           pointRadius: 0,
