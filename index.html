@@ -392,9 +392,15 @@
   <div class="status-bar" id="status-bar"></div>
 
   <!-- Current conditions cards -->
+  <!-- Shown instead of the widgets when the selected unit has no location set. -->
+  <div id="no-loc-note" style="display:none; text-align:center; color:#8b949e; padding:48px 16px; line-height:1.5;">
+    No location set for this unit.<br>
+    Add <code>lat</code>/<code>lng</code> for it in <code>config.js</code> to show wind, tide and swell.
+  </div>
+
   <div class="cards">
     <!-- Wind -->
-    <div class="card wind-card">
+    <div class="card wind-card" id="wind-card">
       <div class="card-label">Wind</div>
       <!-- Compass dial: needle rotates to wind-from bearing; speed in centre -->
       <svg class="compass-svg" viewBox="-48 -48 96 96">
@@ -454,7 +460,7 @@
   </div>
 
   <!-- Wind Chart (speed + direction combined) -->
-  <div class="section">
+  <div class="section" id="wind-section">
     <div class="section-header">
       <span class="section-title">Wind</span>
       <div class="range-btns" id="wind-range-btns">
@@ -527,7 +533,7 @@
 
   <footer>
     Burns Rock Wind Station · <span id="footer-coords"></span> ·
-    <span title="Dashboard version — bumped on every edit">D13</span>
+    <span title="Dashboard version — bumped on every edit">D14</span>
   </footer>
 
 </div>
@@ -1787,12 +1793,27 @@ function applyUnitChrome() {
       camSec.style.display = 'none';
     }
   }
-  // Location-dependent widgets (summary cards + charts) hidden with no location.
-  const disp = unitHasLocation() ? '' : 'none';
-  ['swell-card', 'tide-card', 'swell-section', 'tide-section'].forEach(id => {
+  // Location-dependent widgets. A unit with no location has no tide/swell (and no
+  // sensible sun) — hide the WHOLE marine dashboard (wind included) and show a note.
+  const loc  = unitHasLocation();
+  const disp = loc ? '' : 'none';
+  ['wind-card', 'swell-card', 'tide-card',
+   'wind-section', 'swell-section', 'tide-section'].forEach(id => {
     const el = document.getElementById(id);
     if (el) el.style.display = disp;
   });
+  const note = document.getElementById('no-loc-note');
+  if (note) note.style.display = loc ? 'none' : '';
+}
+
+// Drop the previous unit's cached data so a unit switch shows the new unit's data
+// immediately, without a full browser reload. (mergeWind() keys only on time, so
+// without this the old unit's points linger in _windCache and mix into the chart.)
+function resetUnitCaches() {
+  _windCache = []; _coarseAt = 0;
+  _battData = null; _battAt = 0;
+  _swell = null; _tide = null;
+  _stationChem = '';
 }
 
 function setActiveUnit(id, reload) {
@@ -1808,6 +1829,7 @@ function setActiveUnit(id, reload) {
   try { localStorage.setItem('unit', CONFIG.STATION || ''); } catch (e) {}
   const sel = document.getElementById('unit-select');
   if (sel && CONFIG.STATION) sel.value = CONFIG.STATION;
+  resetUnitCaches();   // clear the previous unit's data so the switch is immediate
   applyUnitChrome();
   if (reload) loadAll();
 }
