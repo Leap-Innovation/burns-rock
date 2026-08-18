@@ -16,8 +16,8 @@ const CONFIG = {
   //    SITE_NAME/LAT/LNG above are just the initial fallback — the selected unit wins.
   UNITS: [
     { id: 'st-e3820c', name: 'Burns Rock', lat: -36.7732, lng: 175.0274 },
-    { id: 'st-e16b78', name: 'V1.0 prototype',   lat: -00.0000, lng: 000.0000 },
-    { id: 'st-53a074', name: 'Bench tester',   lat: -00.0000, lng: 000.0000 },
+    { id: 'st-e16b78', name: 'V1.0 prototype',   lat: 0, lng: 0 },
+    { id: 'st-53a074', name: 'Bench tester',   lat: 0, lng: 0 },
   ],
   STATION:     'st-e3820c',        // active unit (overridden by the dropdown / saved choice)
   NIWA_KEY:    'bDntgt2IkfNxZwqOv0pk9Tp01Xs0wC0D',                 // optional — get free key at developer.niwa.co.nz
