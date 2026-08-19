@@ -392,12 +392,6 @@
   <div class="status-bar" id="status-bar"></div>
 
   <!-- Current conditions cards -->
-  <!-- Shown instead of the widgets when the selected unit has no location set. -->
-  <div id="no-loc-note" style="display:none; text-align:center; color:#8b949e; padding:48px 16px; line-height:1.5;">
-    No location set for this unit.<br>
-    Add <code>lat</code>/<code>lng</code> for it in <code>config.js</code> to show wind, tide and swell.
-  </div>
-
   <div class="cards">
     <!-- Wind -->
     <div class="card wind-card" id="wind-card">
@@ -533,7 +527,7 @@
 
   <footer>
     Burns Rock Wind Station · <span id="footer-coords"></span> ·
-    <span title="Dashboard version — bumped on every edit">D14</span>
+    <span title="Dashboard version — bumped on every edit">D15</span>
   </footer>
 
 </div>
@@ -1793,17 +1787,20 @@ function applyUnitChrome() {
       camSec.style.display = 'none';
     }
   }
-  // Location-dependent widgets. A unit with no location has no tide/swell (and no
-  // sensible sun) — hide the WHOLE marine dashboard (wind included) and show a note.
+  // Location-only bits: the compass summary card + the swell/tide cards & charts.
+  // A unit with no location hides these — but the wind GRAPH still shows.
   const loc  = unitHasLocation();
   const disp = loc ? '' : 'none';
   ['wind-card', 'swell-card', 'tide-card',
-   'wind-section', 'swell-section', 'tide-section'].forEach(id => {
+   'swell-section', 'tide-section'].forEach(id => {
     const el = document.getElementById(id);
     if (el) el.style.display = disp;
   });
+  // Wind chart is always visible, location or not.
+  const ws = document.getElementById('wind-section');
+  if (ws) ws.style.display = '';
   const note = document.getElementById('no-loc-note');
-  if (note) note.style.display = loc ? 'none' : '';
+  if (note) note.style.display = 'none';
 }
 
 // Drop the previous unit's cached data so a unit switch shows the new unit's data
